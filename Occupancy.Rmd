@@ -9,6 +9,7 @@ Input data
 ```{r}
 
 df = read.csv("C:/Users/ryanp/Documents/Dissertation/Chapter4_Camera traps/Camelot Exports/Record Tables/Final_record_table.csv")
+head(df)
 
 ```
 
