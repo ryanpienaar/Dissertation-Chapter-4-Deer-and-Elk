@@ -1,0 +1,14 @@
+---
+title: "Chapter 4"
+author: "R Pienaar"
+date: "`r Sys.Date()`"
+output: pdf_document
+---
+
+Input data
+```{r}
+
+df = read.csv("C:/Users/ryanp/Documents/Dissertation/Chapter4_Camera traps/Camelot Exports/Record Tables/Final_record_table.csv")
+
+```
+
