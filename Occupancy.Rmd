@@ -112,12 +112,32 @@ Occupancy analysis
 library(unmarked)
 deerocc <- deerdh$detection_history
 
-ctt$treatment <- substr(ctt$Station,5,9)
-sh <- as.data.frame(substr(rownames(deerocc),5,9))
 
+Forest <- as.data.frame(substr(rownames(deerocc),5,5))
+Fire <- as.data.frame(substr(rownames(deerocc),7,7))
 
-deerocc <- unmarkedFrameOccu(y = deerocc, siteCovs = sh)
+covs <- cbind(Forest, Fire)
+
+deerocc <- unmarkedFrameOccu(y = deerocc, siteCovs = covs)
 summary(deerocc)
+deerocc
+
+```
+
+Create Models
+
+```{r}
+
+deer1 <- occu(~1~1, data =  deerocc)
+deer1
+
+deer1.psi <- backTransform(deer1, type = "state")
+deer1.psi
+
+deer1.p <- backTransform(deer1, type = "det")
+deer1.p
+
+
 
 ```
 
