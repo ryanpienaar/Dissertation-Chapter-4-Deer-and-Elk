@@ -5,11 +5,119 @@ date: "`r Sys.Date()`"
 output: pdf_document
 ---
 
+Load packages
+
+```{r}
+
+
+library(tidyverse)
+library(camtrapR)
+library(exiftoolr)
+library(plotKML)
+
+
+Sys.which("exiftool.exe") ### Where is exiftool?
+exiftoolPath("C:/Users/ryanp/Documents/Dissertation/Raw data/Nebo Fire/Camera Base 1.7/Fixes/EXIFTool/exiftoolgui/exiftool.exe")
+
+```
+
+
+
 Input data
 ```{r}
 
-df = read.csv("C:/Users/ryanp/Documents/Dissertation/Chapter4_Camera traps/Camelot Exports/Record Tables/Final_record_table.csv")
-head(df)
+rt = read.csv("C:/Users/ryanp/Documents/Dissertation/Chapter4_Camera traps/Camelot Exports/Record Tables/Final_record_table.csv")
+head(rt)
+
+ctt = read.csv("C:/Users/ryanp/Documents/Dissertation/Chapter4_Camera traps/Camelot Exports/Record Tables/Final_camtrap_table.csv")
+
+#df <- df[c(1,4,6,7,8, 15,16)]
+
+camop <- cameraOperation(CTtable = ctt,
+                         stationCol = "Station",
+                         sessionCol = "Session",
+                         setupCol = "Setup_date",
+                         retrievalCol = "Retrieval_date",
+                         hasProblems = FALSE,             #Running as false first but need to go back and change it
+                         dateFormat = "mdy")
+
+
+
+```
+
+
+View data
+
+```{r}
+
+rt <- subset(rt, Species != "Unknown bird")      #remove birds and rabbits
+rt <- subset(rt, Species != "Unknown lagomorph")
+
+count_sp <- as.data.frame(table(rt$Species))  # show number of each species
+count_sp
+names(count_sp) <- c("Species", "N_Obs")
+
+```
+
+```{r}
+
+sp_station <- table(rt$Species,rt$Station)
+sp_station
+
+
+```
+
+Report
+
+```{r}
+
+###### Needs to be done seperately for each session
+
+report <- surveyReport(recordTable = rt,
+                       CTtable = ctt,
+                       speciesCol = "Species",
+                       retrievalCol = "Retrieval_date",
+                       setupCol = "Setup_date",
+                       CTDateFormat = "mdy",
+                       recordDateTimeCol = "DateTimeOriginal",
+                       recordDateTimeFormat = "mdy")
+
+```
+
+Detection History
+
+```{r}
+
+deerdh <- detectionHistory( recordTable = rt,
+                            camOp = camop,
+                            species = "Odocoileus hemionus",
+                            stationCol = "Station",
+                            speciesCol = "Species",
+                            recordDateTimeCol = "Date",
+                            recordDateTimeFormat = "mdy",
+                            occasionLength = 90,
+                            scaleEffort = FALSE,
+                            timeZone = "MST",
+                            day1 = "survey",
+                            unmarkedMultFrameInput = TRUE)
+
+deerdh$detection_history
+
+```
+
+Occupancy analysis
+
+```{r}
+
+library(unmarked)
+deerocc <- deerdh$detection_history
+
+ctt$treatment <- substr(ctt$Station,5,9)
+sh <- as.data.frame(substr(rownames(deerocc),5,9))
+
+
+deerocc <- unmarkedFrameOccu(y = deerocc, siteCovs = sh)
+summary(deerocc)
 
 ```
 
