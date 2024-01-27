@@ -13,7 +13,7 @@ Load packages
 library(tidyverse)
 library(camtrapR)
 library(exiftoolr)
-library(plotKML)
+
 
 
 Sys.which("exiftool.exe") ### Where is exiftool?
@@ -38,7 +38,7 @@ camop <- cameraOperation(CTtable = ctt,
                          sessionCol = "Session",
                          setupCol = "Setup_date",
                          retrievalCol = "Retrieval_date",
-                         hasProblems = FALSE,             #Running as false first but need to go back and change it
+                         hasProblems = FALSE,             #The cameras were out the whole time, we don't know when the problems happened so I'm just keeping it as no problems
                          dateFormat = "mdy")
 
 
@@ -95,7 +95,7 @@ deerdh <- detectionHistory( recordTable = rt,
                             speciesCol = "Species",
                             recordDateTimeCol = "Date",
                             recordDateTimeFormat = "mdy",
-                            occasionLength = 90,
+                            occasionLength = 30,
                             scaleEffort = FALSE,
                             timeZone = "MST",
                             day1 = "survey",
@@ -110,34 +110,86 @@ Occupancy analysis
 ```{r}
 
 library(unmarked)
-deerocc <- deerdh$detection_history
+deerdh <- deerdh$detection_history
 
 
-Forest <- as.data.frame(substr(rownames(deerocc),5,5))
-Fire <- as.data.frame(substr(rownames(deerocc),7,7))
+Forest <- as.data.frame(substr(rownames(deerdh),5,5))
+Fire <- as.data.frame(substr(rownames(deerdh),7,7))
 
 covs <- cbind(Forest, Fire)
+colnames(covs) <- c("Forest", "Fire")
 
-deerocc <- unmarkedFrameOccu(y = deerocc, siteCovs = covs)
+deerocc <- unmarkedFrameOccu(y = deerdh, siteCovs = covs)
+
 summary(deerocc)
 deerocc
 
 ```
 
-Create Models
+Create Models (Single season)
 
 ```{r}
 
-deer1 <- occu(~1~1, data =  deerocc)
-deer1
 
-deer1.psi <- backTransform(deer1, type = "state")
-deer1.psi
+rm(deer3)
+# Null deer model with constant detection and constant occupancy
+d.1.1 <- occu(~1~1, data =  deerocc)  #### detection first, then occupancy
+d.1.1
 
-deer1.p <- backTransform(deer1, type = "det")
-deer1.p
+d.1.1.psi <- backTransform(d.1.1, type = "state") #Occupancy
+d.1.1.psi
+
+d.1.1.p <- backTransform(d.1.1, type = "det") #Detection
+d.1.1.p
+
+d.1.1.psi.ci <- confint(d.1.1.psi)
+d.1.1.p.ci <- confint(d.1.1.p)
+
+###Constant detection
+d.1.FoFi <- occu(~1 ~ Forest + Fire, data = deerocc)
+d.1.FoFi
+
+d.1.Fo <- occu(~1 ~ Forest, data = deerocc)
+d.1.Fi <- occu(~1 ~ Fire, data = deerocc)
 
 
+#Constant occupancy
+d.FoFi.1 <- occu(~Forest + Fire ~1, data = deerocc)
+d.FoFi.1
+
+d.Fo.1 <- occu(~ Forest ~1, data = deerocc)
+d.Fi.1 <- occu(~ Fire ~1, data = deerocc)
+
+# Full model
+d.FoFi.FoFi <- occu(~Forest + Fire ~Forest+Fire, data = deerocc)
 
 ```
+
+Model Selection with constant occupancy to evaluate detection
+
+```{r}
+
+d.const.occ <- fitList(d.FoFi.1,d.Fo.1, d.Fi.1, d.1.1)
+modSel(d.const.occ)
+
+d.FoFi.1
+newdata <- expand.grid(Forest = levels(deerocc@siteCovs$Forest), 
+                       Fire = levels(deerocc@siteCovs$Fire))
+
+det.mod.pred <- predict(d.FoFi.1, type = "det", newdata = newdata, append = TRUE)
+det.mod.pred
+
+```
+
+
+
+
+Create models (multiseason)
+
+```{r}
+
+deer1 <- colext(~1 ~1 ~1 ~1, data = deerocc)
+
+```
+
 
