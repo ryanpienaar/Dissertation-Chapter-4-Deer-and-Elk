@@ -2,7 +2,9 @@
 title: "Chapter 4"
 author: "R Pienaar"
 date: "`r Sys.Date()`"
-output: pdf_document
+output:
+  word_document: default
+  pdf_document: default
 ---
 
 Load packages
@@ -13,7 +15,8 @@ Load packages
 library(tidyverse)
 library(camtrapR)
 library(exiftoolr)
-
+library(unmarked)
+library(ggplot2)
 
 
 Sys.which("exiftool.exe") ### Where is exiftool?
@@ -26,7 +29,7 @@ exiftoolPath("C:/Users/ryanp/Documents/Dissertation/Raw data/Nebo Fire/Camera Ba
 Input data
 ```{r}
 
-rt = read.csv("C:/Users/ryanp/Documents/Dissertation/Chapter4_Camera traps/Camelot Exports/Record Tables/Final_record_table.csv")
+rt = read.csv("C:/Users/ryanp/Documents/Dissertation/Chapter4_Camera traps/Camelot Exports/Record Tables/Record_table_mainpulated.csv")
 head(rt)
 
 ctt = read.csv("C:/Users/ryanp/Documents/Dissertation/Chapter4_Camera traps/Camelot Exports/Record Tables/Final_camtrap_table.csv")
@@ -62,27 +65,12 @@ names(count_sp) <- c("Species", "N_Obs")
 ```{r}
 
 sp_station <- table(rt$Species,rt$Station)
-sp_station
+head(sp_station)
 
 
 ```
 
-Report
 
-```{r}
-
-###### Needs to be done seperately for each session
-
-report <- surveyReport(recordTable = rt,
-                       CTtable = ctt,
-                       speciesCol = "Species",
-                       retrievalCol = "Retrieval_date",
-                       setupCol = "Setup_date",
-                       CTDateFormat = "mdy",
-                       recordDateTimeCol = "DateTimeOriginal",
-                       recordDateTimeFormat = "mdy")
-
-```
 
 Detection History
 
@@ -101,7 +89,7 @@ deerdh <- detectionHistory( recordTable = rt,
                             day1 = "survey",
                             unmarkedMultFrameInput = TRUE)
 
-deerdh$detection_history
+#deerdh$detection_history
 
 ```
 
@@ -110,6 +98,7 @@ Occupancy analysis
 ```{r}
 
 library(unmarked)
+deeref <- deerdh$effort
 deerdh <- deerdh$detection_history
 
 
@@ -122,7 +111,7 @@ colnames(covs) <- c("Forest", "Fire")
 deerocc <- unmarkedFrameOccu(y = deerdh, siteCovs = covs)
 
 summary(deerocc)
-deerocc
+#deerocc
 
 ```
 
@@ -131,7 +120,7 @@ Create Models (Single season)
 ```{r}
 
 
-rm(deer3)
+
 # Null deer model with constant detection and constant occupancy
 d.1.1 <- occu(~1~1, data =  deerocc)  #### detection first, then occupancy
 d.1.1
@@ -181,6 +170,19 @@ det.mod.pred
 
 ```
 
+Full Model Selection
+
+```{r}
+
+d.full.occ <- fitList(d.FoFi.1,d.Fo.1, d.Fi.1, d.1.1, d.1.Fi,d.1.Fo, d.1.FoFi, d.FoFi.FoFi)
+modSel(d.full.occ)
+
+d.FoFi.1
+
+full.mod.pred <- predict(d.FoFi.1, type = "det", newdata = newdata, append = TRUE)
+full.mod.pred
+
+```
 
 
 
@@ -188,7 +190,128 @@ Create models (multiseason)
 
 ```{r}
 
-deer1 <- colext(~1 ~1 ~1 ~1, data = deerocc)
+#deer1 <- colext(~1 ~1 ~1 ~1, data = deerocc)
+
+```
+
+Different site years occupancy analysis       
+
+```{r}
+
+year.sites <- ctt
+year.sites$Station_Session <- paste(ctt$Station, ctt$Session +1, sep = "_")
+
+for (i in year.sites) {
+  year.sites$Session <- 1
+}
+
+ys.camop <- cameraOperation(CTtable = year.sites,
+                            stationCol = "Station_Session",
+                            sessionCol = "Session",
+                            setupCol = "Setup_date",
+                            retrievalCol = "Retrieval_date",
+                            hasProblems = FALSE,
+                            dateFormat = "mdy")
+
+ys.rt <- rt
+
+ys.rt$Station_Y <- paste(rt$Station, rt$YearsPostfire, sep = "_")
+
+ys.rt <- subset(ys.rt, Species != "Unknown bird")      #remove birds and rabbits
+ys.rt <- subset(ys.rt, Species != "Unknown lagomorph")
+
+ys.count_sp <- as.data.frame(table(ys.rt$Species))  # show number of each species
+ys.count_sp
+names(ys.count_sp) <- c("Species", "N_Obs")
+
+ys.sp_station <- table(ys.rt$Species, ys.rt$Station)
+head(ys.sp_station)
+
+ys.deerdh <- detectionHistory( recordTable = ys.rt,
+                            camOp = ys.camop,
+                            species = "Odocoileus hemionus",
+                            stationCol = "Station_Y",
+                            speciesCol = "Species",
+                            recordDateTimeCol = "Date",
+                            recordDateTimeFormat = "mdy",
+                            occasionLength = 30,
+                            scaleEffort = FALSE,
+                            timeZone = "MST",
+                            day1 = "survey",
+                            unmarkedMultFrameInput = TRUE)
+
+ys.deeref <- ys.deerdh$effort
+ys.deerdh <- ys.deerdh$detection_history
+
+
+ys.Forest <- as.data.frame(substr(rownames(ys.deerdh),5,5))
+ys.Fire <- as.data.frame(substr(rownames(ys.deerdh),7,7))
+Years_PostFire <- as.data.frame(substr(rownames(ys.deerdh),11,11))
+
+ys.covs <- cbind(ys.Forest, ys.Fire, Years_PostFire)
+colnames(ys.covs) <- c("Forest", "Fire", "Years_PostFire")
+
+ys.deerocc <- unmarkedFrameOccu(y = ys.deerdh, siteCovs = ys.covs)
+
+summary(ys.deerocc)
+
+
+# Null deer model with constant detection and constant occupancy
+ys.d.1.1 <- occu(~1~1, data =  ys.deerocc)  #### detection first, then occupancy
+
+
+ys.d.1.1.psi <- backTransform(ys.d.1.1, type = "state") #Occupancy
+
+
+ys.d.1.1.p <- backTransform(ys.d.1.1, type = "det") #Detection
+
+
+ys.d.1.1.psi.ci <- confint(ys.d.1.1.psi)
+ys.d.1.1.p.ci <- confint(ys.d.1.1.p)
+
+###Constant detection
+ys.d.1.FoFiYf <- occu(~1 ~ Forest + Fire + Years_PostFire , data = ys.deerocc)
+
+
+ys.d.1.FoFi <- occu(~1 ~ Forest + Fire , data = ys.deerocc)
+ys.d.1.FoYf <- occu(~1 ~ Forest + Years_PostFire, data = ys.deerocc)
+ys.d.1.FiYF <- occu(~1 ~ Fire + Years_PostFire, data = ys.deerocc)
+
+ys.d.1.Yf <- occu(~1 ~ Years_PostFire, data = ys.deerocc)
+ys.d.1.Fo <- occu(~1 ~ Forest, data = ys.deerocc)
+ys.d.1.Fi <- occu(~1 ~ Fire, data = ys.deerocc)
+
+
+#Constant occupancy
+ys.d.FoFiYf.1 <- occu(~Forest + Fire + Years_PostFire ~1, data = ys.deerocc)
+
+ys.d.FoFi.1 <- occu(~Forest + Fire ~1, data = ys.deerocc)
+ys.d.FoYf.1 <- occu(~Forest + Years_PostFire ~1, data = ys.deerocc)
+ys.d.FiYf.1 <- occu(~Fire + Years_PostFire ~1, data = ys.deerocc)
+
+ys.d.Fo.1 <- occu(~ Forest ~1, data = ys.deerocc)
+ys.d.Fi.1 <- occu(~ Fire ~1, data = ys.deerocc)
+ys.d.Yf.1 <- occu(~ Years_PostFire ~1, data = ys.deerocc)
+
+# Full model
+ys.d.FoFiYf.FoFiYf <- occu(~Forest + Fire ~Forest+Fire + Years_PostFire, data = ys.deerocc)
+
+ys.d.full.occ <- fitList(ys.d.1.1, ys.d.1.Fi, ys.d.1.FiYF, ys.d.1.Fo,
+                         ys.d.1.FoFi, ys.d.1.FoFiYf, ys.d.1.FoYf, ys.d.Yf.1, ys.d.Fi.1, ys.d.Fo.1,
+                         ys.d.FoFi.1, ys.d.FoFiYf.1, ys.d.FiYf.1, ys.d.FoYf.1, ys.d.FoFiYf.FoFiYf)
+
+modSel(ys.d.full.occ)
+
+ys.d.FoFiYf.1
+pred.data <- expand.grid(Forest = levels(ys.deerocc@siteCovs$Forest), 
+                       Fire = levels(ys.deerocc@siteCovs$Fire),
+                       Years_PostFire = levels(ys.deerocc@siteCovs$Years_PostFire))
+
+ys.full.mod.pred <- predict(ys.d.FoFiYf.1, type = "det", newdata = pred.data, append = TRUE)
+ys.full.mod.pred
+
+ggplot(data = ys.full.mod.pred, aes(Fire, Predicted, fill = Forest))+
+  geom_boxplot()
 
 ```
 
