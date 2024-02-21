@@ -17,6 +17,7 @@ library(camtrapR)
 library(exiftoolr)
 library(unmarked)
 library(ggplot2)
+library(MuMIn)
 
 
 Sys.which("exiftool.exe") ### Where is exiftool?
@@ -294,7 +295,7 @@ ys.d.Fi.1 <- occu(~ Fire ~1, data = ys.deerocc)
 ys.d.Yf.1 <- occu(~ Years_PostFire ~1, data = ys.deerocc)
 
 # Full model
-ys.d.FoFiYf.FoFiYf <- occu(~Forest + Fire ~Forest+Fire + Years_PostFire, data = ys.deerocc)
+ys.d.FoFiYf.FoFiYf <- occu(~Forest + Fire +Years_PostFire ~Forest+Fire + Years_PostFire, data = ys.deerocc)
 
 ys.d.full.occ <- fitList(ys.d.1.1, ys.d.1.Fi, ys.d.1.FiYF, ys.d.1.Fo,
                          ys.d.1.FoFi, ys.d.1.FoFiYf, ys.d.1.FoYf, ys.d.Yf.1, ys.d.Fi.1, ys.d.Fo.1,
@@ -312,6 +313,119 @@ ys.full.mod.pred
 
 ggplot(data = ys.full.mod.pred, aes(Fire, Predicted, fill = Forest))+
   geom_boxplot()
+
+y.full.dredge <- dredge(ys.d.FoFiYf.FoFiYf)
+
+#### Model comparison
+
+head(y.full.dredge)
+
+# select models with the most support for model averaging (< 2 delta aicc)
+
+ys.dredge.delta <- get.models(y.full.dredge, subset = delta <= 2)
+
+ys.avg <- model.avg(ys.dredge.delta)
+
+coef(ys.avg) %>%
+  enframe
+
+
+ys.avg.pred <- predict(ys.avg, type = "det", newdata = pred.data, append= TRUE)
+ys.avg.pred 
+
+ys.result <- cbind(pred.data, ys.avg.pred)
+
+ggplot(data = ys.result, aes(Years_PostFire, fit))+
+  geom_boxplot(fill = "grey")+
+  theme_classic()
+
+ggplot(data = ys.result, aes(Forest, fit))+
+  geom_boxplot(fill = "grey")+
+  theme_classic()
+
+ggplot(data = ys.result, aes(Fire, fit))+
+  geom_boxplot(fill = "grey")+
+  theme_classic()
+
+ggplot(data = ys.result, aes(Forest, fit, fill = Fire))+
+  geom_boxplot()+
+  theme_classic()
+
+### Royle Nichols models
+
+# Null deer model with constant detection and constant occupancy
+ys.rn.1.1 <- occuRN(~1~1, data =  ys.deerocc)  #### detection first, then occupancy
+
+
+ys.rn.1.1.psi <- backTransform(ys.rn.1.1, type = "state") #Occupancy
+
+
+ys.rn.1.1.p <- backTransform(ys.rn.1.1, type = "det") #Detection
+
+
+ys.rn.1.1.psi.ci <- confint(ys.rn.1.1.psi)
+ys.rn.1.1.p.ci <- confint(ys.rn.1.1.p)
+
+###Constant detection
+ys.rn.1.FoFiYf <- occuRN(~1 ~ Forest + Fire + Years_PostFire , data = ys.deerocc)
+
+
+ys.rn.1.FoFi <- occuRN(~1 ~ Forest + Fire , data = ys.deerocc)
+ys.rn.1.FoYf <- occuRN(~1 ~ Forest + Years_PostFire, data = ys.deerocc)
+ys.rn.1.FiYF <- occuRN(~1 ~ Fire + Years_PostFire, data = ys.deerocc)
+
+ys.rn.1.Yf <- occuRN(~1 ~ Years_PostFire, data = ys.deerocc)
+ys.rn.1.Fo <- occuRN(~1 ~ Forest, data = ys.deerocc)
+ys.rn.1.Fi <- occuRN(~1 ~ Fire, data = ys.deerocc)
+
+
+#Constant occupancy
+ys.rn.FoFiYf.1 <- occuRN(~Forest + Fire + Years_PostFire ~1, data = ys.deerocc)
+
+ys.rn.FoFi.1 <- occuRN(~Forest + Fire ~1, data = ys.deerocc)
+ys.rn.FoYf.1 <- occuRN(~Forest + Years_PostFire ~1, data = ys.deerocc)
+ys.rn.FiYf.1 <- occuRN(~Fire + Years_PostFire ~1, data = ys.deerocc)
+
+ys.rn.Fo.1 <- occuRN(~ Forest ~1, data = ys.deerocc)
+ys.rn.Fi.1 <- occuRN(~ Fire ~1, data = ys.deerocc)
+ys.rn.Yf.1 <- occuRN(~ Years_PostFire ~1, data = ys.deerocc)
+
+# Full model
+ys.rn.FoFiYf.FoFiYf <- occuRN(~Forest + Fire +Years_PostFire ~Forest+Fire + Years_PostFire, data = ys.deerocc)
+
+ys.rn.full.occ <- fitList(ys.rn.1.1, ys.rn.1.Fi, ys.rn.1.FiYF, ys.rn.1.Fo,
+                  ys.rn.1.FoFi, ys.rn.1.FoFiYf, ys.rn.1.FoYf, ys.rn.Yf.1, ys.rn.Fi.1, ys.rn.Fo.1,
+                  ys.rn.FoFi.1, ys.rn.FoFiYf.1, ys.rn.FiYf.1, ys.rn.FoYf.1, ys.rn.FoFiYf.FoFiYf)
+
+modSel(ys.rn.full.occ)
+
+ys.rn.1.FoFiYf
+
+
+pred.data <- expand.grid(Forest = levels(ys.deerocc@siteCovs$Forest), 
+                       Fire = levels(ys.deerocc@siteCovs$Fire),
+                       Years_PostFire = levels(ys.deerocc@siteCovs$Years_PostFire))
+
+ys.rn.full.mod.pred <- predict(ys.rn.FoFiYf.1, type = "det", newdata = pred.data, append = TRUE)
+ys.rn.full.mod.pred
+
+ggplot(data = ys.rn.full.mod.pred, aes(Fire, Predicted, fill = Forest))+
+  geom_boxplot()
+
+y.rn.full.dredge <- dredge(ys.rn.FoFiYf.FoFiYf)
+
+#### Model comparison
+
+head(y.rn.full.dredge)
+
+# select models with the most support for model averaging (< 2 delta aicc)
+
+ys.rn.dredge.delta <- get.models(y.rn.full.dredge, subset = delta <= 2)
+
+ys.rn.avg <- model.avg(ys.dredge.delta)
+
+coef(ys.rn.avg) %>%
+  enframe
 
 ```
 
