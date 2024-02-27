@@ -1,0 +1,410 @@
+---
+title: "Deer"
+author: "R Pienaar"
+date: "`r Sys.Date()`"
+output: word_document
+---
+
+Occupancy and Relative Habitat Use for Mule Deer in the Pole Creek Megafire 
+Burne area from 2019 to 2023 using camera trap data
+
+Load packages 
+
+```{r}
+
+
+library(tidyverse)
+library(camtrapR)
+library(unmarked)
+library(ggplot2)
+library(MuMIn)
+
+```
+
+Input data
+```{r}
+
+rt = read.csv("C:/Users/ryanp/Documents/Dissertation/Chapter4_Camera traps/Camelot Exports/Record Tables/Record_table_mainpulated.csv")
+head(rt)
+
+ctt = read.csv("C:/Users/ryanp/Documents/Dissertation/Chapter4_Camera traps/Camelot Exports/Record Tables/Final_camtrap_table.csv")
+
+#df <- df[c(1,4,6,7,8, 15,16)]
+
+camop <- cameraOperation(CTtable = ctt,
+                         stationCol = "Station",
+                         sessionCol = "Session",
+                         setupCol = "Setup_date",
+                         retrievalCol = "Retrieval_date",
+                         hasProblems = FALSE,             #The cameras were out the whole time, we don't know when the problems happened so I'm just keeping it as no problems
+                         dateFormat = "mdy")
+
+
+
+```
+
+View data
+
+```{r}
+
+rt <- subset(rt, Species != "Unknown bird")      #remove birds and rabbits
+rt <- subset(rt, Species != "Unknown lagomorph")
+
+count_sp <- as.data.frame(table(rt$Species))  # show number of each species
+count_sp
+names(count_sp) <- c("Species", "N_Obs")
+
+```
+
+
+```{r}
+
+sp_station <- table(rt$Species,rt$Station)
+head(sp_station)
+
+```
+
+
+Detection History
+
+```{r}
+
+deerdh <- detectionHistory( recordTable = rt,
+                            camOp = camop,
+                            species = "Odocoileus hemionus",
+                            stationCol = "Station",
+                            speciesCol = "Species",
+                            recordDateTimeCol = "Date",
+                            recordDateTimeFormat = "mdy",
+                            occasionLength = 30,
+                            scaleEffort = FALSE,
+                            timeZone = "MST",
+                            day1 = "survey",
+                            unmarkedMultFrameInput = TRUE)
+
+#deerdh$detection_history
+
+```
+
+Occupancy analysis
+
+```{r}
+
+
+deeref <- deerdh$effort
+deerdh <- deerdh$detection_history
+
+
+Forest <- as.data.frame(substr(rownames(deerdh),5,5))
+Fire <- as.data.frame(substr(rownames(deerdh),7,7))
+
+covs <- cbind(Forest, Fire)
+colnames(covs) <- c("Forest", "Fire")
+
+deerocc <- unmarkedFrameOccu(y = deerdh, siteCovs = covs)
+
+summary(deerocc)
+#deerocc
+
+```
+
+
+Different site years occupancy analysis       
+
+```{r}
+
+year.sites <- ctt
+year.sites$Station_Session <- paste(ctt$Station, ctt$Session +1, sep = "_")
+
+for (i in year.sites) {
+  year.sites$Session <- 1
+}
+
+ys.camop <- cameraOperation(CTtable = year.sites,
+                            stationCol = "Station_Session",
+                            sessionCol = "Session",
+                            setupCol = "Setup_date",
+                            retrievalCol = "Retrieval_date",
+                            hasProblems = FALSE,
+                            dateFormat = "mdy")
+
+ys.rt <- rt
+
+ys.rt$Station_Y <- paste(rt$Station, rt$YearsPostfire, sep = "_")
+
+ys.rt <- subset(ys.rt, Species != "Unknown bird")      #remove birds and rabbits
+ys.rt <- subset(ys.rt, Species != "Unknown lagomorph")
+
+ys.count_sp <- as.data.frame(table(ys.rt$Species))  # show number of each species
+ys.count_sp
+names(ys.count_sp) <- c("Species", "N_Obs")
+
+ys.sp_station <- table(ys.rt$Species, ys.rt$Station)
+head(ys.sp_station)
+
+ys.deerdh <- detectionHistory( recordTable = ys.rt,
+                            camOp = ys.camop,
+                            species = "Odocoileus hemionus",
+                            stationCol = "Station_Y",
+                            speciesCol = "Species",
+                            recordDateTimeCol = "Date",
+                            recordDateTimeFormat = "mdy",
+                            occasionLength = 30,
+                            scaleEffort = FALSE,
+                            timeZone = "MST",
+                            day1 = "survey",
+                            unmarkedMultFrameInput = TRUE)
+
+ys.deeref <- ys.deerdh$effort
+ys.deerdh <- ys.deerdh$detection_history
+
+
+ys.Forest <- as.data.frame(substr(rownames(ys.deerdh),5,5))
+ys.Fire <- as.data.frame(substr(rownames(ys.deerdh),7,7))
+Years_PostFire <- as.data.frame(substr(rownames(ys.deerdh),11,11))
+
+ys.covs <- cbind(ys.Forest, ys.Fire, Years_PostFire)
+colnames(ys.covs) <- c("Forest", "Fire", "Years_PostFire")
+
+ys.deerocc <- unmarkedFrameOccu(y = ys.deerdh, siteCovs = ys.covs)
+```
+
+Detection model selection
+
+```{r}
+
+# Null deer model with constant detection and constant occupancy
+do.d.1.1 <- occu(~1~1, data =  ys.deerocc)  #### detection first, then occupancy
+
+###Constant occupancy
+do.d.1.FoFiYf <- occu( ~ Forest + Fire  + Years_PostFire~1 , data = ys.deerocc)
+
+do.d.1.FoFi <- occu( ~ Forest + Fire ~1 , data = ys.deerocc)
+do.d.1.FoYf <- occu( ~ Forest + Years_PostFire ~1, data = ys.deerocc)
+do.d.1.FiYF <- occu( ~ Fire + Years_PostFire ~1, data = ys.deerocc)
+
+do.d.1.Yf <- occu( ~ Years_PostFire ~1, data = ys.deerocc)
+do.d.1.Fo <- occu( ~ Forest ~1, data = ys.deerocc)
+do.d.1.Fi <- occu( ~ Fire ~1, data = ys.deerocc)
+
+### Interacting constant detection models
+do.d.1.a <- occu( ~ Forest*Fire ~1, data = ys.deerocc)
+do.d.1.b <- occu( ~ Forest*Years_PostFire ~1, data = ys.deerocc) 
+do.d.1.c <- occu( ~ Fire*Years_PostFire ~1, data = ys.deerocc) 
+
+do.d.list <- fitList(do.d.1.1, do.d.1.FoFiYf, do.d.1.FoFi, do.d.1.FoYf, do.d.1.FiYF,
+                     do.d.1.Fi, do.d.1.Fo, do.d.1.Yf, do.d.1.a, do.d.1.b, do.d.1.c)
+
+do.d.mod <- model.sel(do.d.1.1, do.d.1.FoFiYf, do.d.1.FoFi, do.d.1.FoYf, do.d.1.FiYF,
+                     do.d.1.Fi, do.d.1.Fo, do.d.1.Yf, do.d.1.a, do.d.1.b, do.d.1.c)
+
+modSel(do.d.list)
+head(do.d.mod)
+typeof(do.d.mod)
+#write.csv(as.data.frame(do.d.mod), "deer_const_occ.csv")
+## Best model is Forest, Fire and years postfire according to model.sel and modSel
+
+```
+
+Occupancy model selection
+
+```{r}
+
+# Null deer model with constant detection and constant occupancy
+oo.d.1.1 <- occu(~1~1, data =  ys.deerocc)  #### detection first, then occupancy
+
+### Occupancy with best detection model
+oo.d.FoFiYf.FoFiYf <- occu(~Forest +Fire+ Years_PostFire ~ Forest + Fire + Years_PostFire , data = ys.deerocc)
+
+oo.d.FoFiYf.FoFi <- occu(~Forest + Fire + Years_PostFire ~ Forest + Fire , data = ys.deerocc)
+oo.d.FoFiYf.FoYf <- occu(~ Forest + Fire + Years_PostFire ~ Forest + Years_PostFire, data = ys.deerocc)
+oo.d.FoFiYf.FiYF <- occu(~ Forest + Years_PostFire ~ Fire + Years_PostFire, data = ys.deerocc)
+
+oo.d.FoFiYf.Yf <- occu(~ Forest + Fire + Years_PostFire ~ Years_PostFire, data = ys.deerocc)
+oo.d.FoFiYf.Fo <- occu(~ Forest + Fire + Years_PostFire ~ Forest, data = ys.deerocc)
+oo.d.FoFiYf.Fi <- occu(~ Forest + Fire + Years_PostFire ~ Fire, data = ys.deerocc)
+
+
+oo.d.FoFiYf.a <- occu(~ Forest + Fire + Years_PostFire ~ Forest*Fire, data = ys.deerocc)
+oo.d.FoFiYf.b <- occu(~ Forest + Fire + Years_PostFire ~ Forest*Years_PostFire, data = ys.deerocc) 
+oo.d.FoFiYf.c <- occu(~ Forest + Fire + Years_PostFire ~ Fire*Years_PostFire, data = ys.deerocc) 
+
+oo.d.list <- list(oo.d.1.1, oo.d.FoFiYf.FoFiYf, oo.d.FoFiYf.FoFi, oo.d.FoFiYf.FoYf, oo.d.FoFiYf.FiYF,
+                     oo.d.FoFiYf.Fi, oo.d.FoFiYf.Fo, oo.d.FoFiYf.Yf, oo.d.FoFiYf.a, oo.d.FoFiYf.b, oo.d.FoFiYf.c)
+
+oo.d.mod <- model.sel(oo.d.list)
+oo.d.mod
+oo.deer.avg <- get.models(oo.d.mod, subset = delta <= 4)
+
+occ.deer.avg <- model.avg(oo.deer.avg)
+head(oo.deer.avg)
+
+#write.csv(as.data.frame(oo.d.mod), "deer_occ.csv")
+
+
+```
+
+Occupancy model outputs
+
+```{r}
+
+pred.data <- expand.grid(Forest = levels(ys.deerocc@siteCovs$Forest), 
+                       Fire = levels(ys.deerocc@siteCovs$Fire),
+                       Years_PostFire = levels(ys.deerocc@siteCovs$Years_PostFire))
+
+coef(oo.deer.avg) %>%
+  enframe
+
+occ.deer.pred <- predict(occ.deer.avg, type = "state", newdata= pred.data, append = TRUE)
+
+occ.deer.pred <- cbind(pred.data, occ.deer.pred)
+occ.deer.pred
+
+occ.deer.pred |> group_by(Years_PostFire) |>
+  summarise(pred = mean(fit))
+
+
+ggplot(data = occ.deer.pred, aes(Years_PostFire, fit))+
+  geom_boxplot(fill = "grey")+
+  theme_classic()
+
+ggplot(data = occ.deer.pred, aes(Forest, fit))+
+  geom_boxplot(fill = "grey")+
+  theme_classic()
+
+ggplot(data = occ.deer.pred, aes(Fire, fit))+
+  geom_boxplot(fill = "grey")+
+  theme_classic()
+
+ggplot(data = occ.deer.pred, aes(Forest, fit, fill = Fire))+
+  geom_boxplot()+
+  theme_classic()
+
+occ.deer.pred |> group_by(Forest, Fire,  fit) |>
+  summarise(mean_fit = mean(fit),
+            se_fit = sqrt(sum(se.fit^2)) / n()) |> 
+  ggplot(aes(Forest, mean_fit, fill = Fire, color = Fire))+
+  geom_boxplot()+
+  geom_errorbar(aes(ymin = mean_fit-se_fit, ymax = mean_fit+se_fit),
+                width = 0.3, position = position_dodge(0.75))+
+  theme_classic()
+
+
+```
+
+Royle Nichols Relative Habitat Use
+Detection
+
+```{r}
+
+# Null deer model with constant detection and constant occupancy
+drn.d.1.1 <- occuRN(~1~1, data =  ys.deerocc)  #### detection first, then occuRNpancy
+
+###Constant detection
+drn.d.1.FoFiYf <- occuRN( ~ Forest + Fire + Years_PostFire ~ 1 , data = ys.deerocc)
+
+drn.d.1.FoFi <- occuRN( ~ Forest + Fire ~1, data = ys.deerocc)
+drn.d.1.FoYf <- occuRN( ~ Forest + Years_PostFire ~1, data = ys.deerocc)
+drn.d.1.FiYF <- occuRN( ~ Fire + Years_PostFire ~1, data = ys.deerocc)
+
+drn.d.1.Yf <- occuRN( ~ Years_PostFire ~1, data = ys.deerocc)
+drn.d.1.Fo <- occuRN( ~ Forest ~1, data = ys.deerocc)
+drn.d.1.Fi <- occuRN( ~ Fire ~1, data = ys.deerocc)
+
+### Interacting constant detection models
+drn.d.1.a <- occuRN( ~ Forest*Fire ~1, data = ys.deerocc)
+drn.d.1.b <- occuRN( ~ Forest*Years_PostFire ~1, data = ys.deerocc) 
+drn.d.1.c <- occuRN( ~ Fire*Years_PostFire ~1, data = ys.deerocc) 
+
+drn.d.list <- fitList(drn.d.1.1, drn.d.1.FoFiYf, drn.d.1.FoFi, drn.d.1.FoYf, drn.d.1.FiYF,
+                     drn.d.1.Fi, drn.d.1.Fo, drn.d.1.Yf, drn.d.1.a, drn.d.1.b, drn.d.1.c)
+
+drn.d.mod <- model.sel(drn.d.1.1, drn.d.1.FoFiYf, drn.d.1.FoFi, drn.d.1.FoYf, drn.d.1.FiYF,
+                     drn.d.1.Fi, drn.d.1.Fo, drn.d.1.Yf, drn.d.1.a, drn.d.1.b, drn.d.1.c)
+drn.d.mod
+
+#write.csv(as.data.frame(drn.d.mod),"deer_const_rn.csv")
+
+## Best model is Forest interacting with fire
+
+```
+
+Relative habitat use with best detection model
+
+```{r}
+
+# Null deer model with constant detection and constant occupancy
+orn.d.1.1 <- occuRN(~1~1, data =  ys.deerocc)  #### detection first, then occupancy
+
+### Occupancy with best detection model
+orn.d.FoFi.FoFiYf <- occuRN(~Forest * Fire ~ Forest + Fire + Years_PostFire , data = ys.deerocc)
+
+orn.d.FoFi.FoFi <- occuRN(~Forest * Fire ~ Forest + Fire , data = ys.deerocc)
+orn.d.FoFi.FoYf <- occuRN(~ Forest * Fire ~ Forest + Years_PostFire, data = ys.deerocc)
+orn.d.FoFi.FiYF <- occuRN(~ Forest * Fire ~ Fire + Years_PostFire, data = ys.deerocc)
+
+orn.d.FoFi.Yf <- occuRN(~ Forest * Fire ~ Years_PostFire, data = ys.deerocc)
+orn.d.FoFi.Fo <- occuRN(~ Forest * Fire ~ Forest, data = ys.deerocc)
+orn.d.FoFi.Fi <- occuRN(~ Forest * Fire ~ Fire, data = ys.deerocc)
+
+
+orn.d.FoFi.a <- occuRN(~ Forest * Fire ~ Forest*Fire, data = ys.deerocc)
+orn.d.FoFi.b <- occuRN(~ Forest * Fire ~ Forest*Years_PostFire, data = ys.deerocc) 
+orn.d.FoFi.c <- occuRN(~ Forest * Fire ~ Fire*Years_PostFire, data = ys.deerocc) 
+
+orn.d.mod <- model.sel(orn.d.1.1, orn.d.FoFi.FoFiYf, orn.d.FoFi.FoFi, orn.d.FoFi.FoYf, orn.d.FoFi.FiYF,
+                     orn.d.FoFi.Fi, orn.d.FoFi.Fo, orn.d.FoFi.Yf, orn.d.FoFi.a, orn.d.FoFi.b, orn.d.FoFi.c)
+head(orn.d.mod) # Average top models because they have uninformative parameters
+
+#write.csv(as.data.frame(orn.d.mod), "deer_rn.csv")
+
+rn.deer.avg <- get.models(orn.d.mod, subset = delta <= 4)
+
+rn.deer.avg <- model.avg(rn.deer.avg)
+head(rn.deer.avg)
+
+```
+
+Relative habitat use model outputs
+
+```{r}
+
+coef(rn.deer.avg) %>%
+  enframe
+
+rn.deer.pred <- predict(rn.deer.avg, type = "state", newdata = pred.data, append= TRUE)
+
+rn.deer.pred <- cbind(pred.data, rn.deer.pred)
+rn.deer.pred
+
+rn.deer.pred |> group_by(Forest , Fire) |>
+  summarise(pred = mean(fit))
+
+
+ggplot(data = rn.deer.pred, aes(Years_PostFire, fit))+
+  geom_boxplot(fill = "grey")+
+  theme_classic()
+
+ggplot(data = rn.deer.pred, aes(Forest, fit))+
+  geom_boxplot(fill = "grey")+
+  theme_classic()
+
+ggplot(data = rn.deer.pred, aes(Fire, fit))+
+  geom_boxplot(fill = "grey")+
+  theme_classic()
+
+ggplot(data = rn.deer.pred, aes(Forest, fit, fill = Fire))+
+  geom_boxplot()+
+  theme_classic()
+
+rn.deer.pred |> group_by(Forest, Fire) |>
+  summarise(mean_fit = mean(fit),
+            se_fit = sqrt(sum(se.fit^2)) / n()) |>
+  ggplot(aes(Forest, mean_fit, fill = Fire, color = Fire))+
+  geom_boxplot()+
+  geom_errorbar(aes(ymin = mean_fit-se_fit, ymax = mean_fit+se_fit),
+                width = 0.3, position = position_dodge(0.75))+
+  theme_classic()
+
+
+```

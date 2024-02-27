@@ -351,6 +351,25 @@ ggplot(data = ys.result, aes(Forest, fit, fill = Fire))+
   geom_boxplot()+
   theme_classic()
 
+mean(ys.result[ys.result$Fire==0,4]) 
+# mean Relative Habitat Use in unburned areas across all years and forest types: 0.32
+mean(ys.result[ys.result$Fire==1,4]) 
+# mean Relative Habitat Use in burned areas across all years and forest types: 0.37 ie 1.16 times greater than unburned
+mean(ys.result[ys.result$Forest=="A",4]) 
+# mean Relative Habitat Use in Aspen forests across all years and burn statuses: 0.27
+mean(ys.result[ys.result$Forest=="M",4]) 
+# mean Relative Habitat Use in Maple forests across all years and burn statuses: 0.33
+mean(ys.result[ys.result$Forest=="J",4]) 
+# mean Relative Habitat Use in Juniper forests across all years and burn statuses: 0.42 ie 1.56 times greater than aspen
+mean(ys.result[ys.result$Years_PostFire==2,4]) 
+# mean Relative Habitat Use in 2nd year postfire across forests and burn statuses: 0.45 ie 1.88 times greater than in the 3rd year
+mean(ys.result[ys.result$Years_PostFire==3,4]) 
+# mean Relative Habitat Use in 3rd year postfire across forests and burn statuses: 0.24
+mean(ys.result[ys.result$Years_PostFire==4,4]) 
+# mean Relative Habitat Use in 4th year postfire across forests and burn statuses: 0.35
+mean(ys.result[ys.result$Years_PostFire==5,4]) 
+# mean Relative Habitat Use in 5th year postfire across forests and burn statuses: 0.33
+
 ### Royle Nichols models
 
 # Null deer model with constant detection and constant occupancy
@@ -409,7 +428,7 @@ pred.data <- expand.grid(Forest = levels(ys.deerocc@siteCovs$Forest),
 ys.rn.full.mod.pred <- predict(ys.rn.FoFiYf.1, type = "det", newdata = pred.data, append = TRUE)
 ys.rn.full.mod.pred
 
-ggplot(data = ys.rn.full.mod.pred, aes(Fire, Predicted, fill = Forest))+
+ggplot(data = ys.rn.full.mod.pred, aes(Years_PostFire, Predicted, fill = Fire))+
   geom_boxplot()
 
 y.rn.full.dredge <- dredge(ys.rn.FoFiYf.FoFiYf)
@@ -427,6 +446,185 @@ ys.rn.avg <- model.avg(ys.dredge.delta)
 coef(ys.rn.avg) %>%
   enframe
 
+ys.rn.avg.pred <- predict(ys.rn.avg, type = "det", newdata = pred.data, append= TRUE)
+
+ys.rn.result <- cbind(pred.data, ys.rn.avg.pred)
+ys.rn.result
+
+ggplot(data = ys.rn.result, aes(Years_PostFire, fit))+
+  geom_boxplot(fill = "grey")+
+  theme_classic()
+
+ggplot(data = ys.rn.result, aes(Forest, fit))+
+  geom_boxplot(fill = "grey")+
+  theme_classic()
+
+ggplot(data = ys.rn.result, aes(Fire, fit))+
+  geom_boxplot(fill = "grey")+
+  theme_classic()
+
+ggplot(data = ys.rn.result, aes(Forest, fit, fill = Fire))+
+  geom_boxplot()+
+  theme_classic()
+
+str(ys.rn.result)
+
+mean(ys.rn.result[ys.rn.result$Fire==0,4]) 
+# mean Relative Habitat Use in unburned areas across all years and forest types: 0.32
+mean(ys.rn.result[ys.rn.result$Fire==1,4]) 
+# mean Relative Habitat Use in burned areas across all years and forest types: 0.37 ie 1.16 times greater than unburned
+mean(ys.rn.result[ys.rn.result$Forest=="A",4]) 
+# mean Relative Habitat Use in Aspen forests across all years and burn statuses: 0.27
+mean(ys.rn.result[ys.rn.result$Forest=="M",4]) 
+# mean Relative Habitat Use in Maple forests across all years and burn statuses: 0.33
+mean(ys.rn.result[ys.rn.result$Forest=="J",4]) 
+# mean Relative Habitat Use in Juniper forests across all years and burn statuses: 0.42 ie 1.56 times greater than aspen
+mean(ys.rn.result[ys.rn.result$Years_PostFire==2,4]) 
+# mean Relative Habitat Use in 2nd year postfire across forests and burn statuses: 0.45 ie 1.88 times greater than in the 3rd year
+mean(ys.rn.result[ys.rn.result$Years_PostFire==3,4]) 
+# mean Relative Habitat Use in 3rd year postfire across forests and burn statuses: 0.24
+mean(ys.rn.result[ys.rn.result$Years_PostFire==4,4]) 
+# mean Relative Habitat Use in 4th year postfire across forests and burn statuses: 0.35
+mean(ys.rn.result[ys.rn.result$Years_PostFire==5,4]) 
+# mean Relative Habitat Use in 5th year postfire across forests and burn statuses: 0.33
+
 ```
+
+Create a model selection table that includes coefficients
+
+```{r}
+
+occ.mod.sel <- as.data.frame(y.full.dredge)
+test <- coef(y.full.dredge[1])
+test[4]
+
+coef(y.full.dredge)
+occ.mod.sel <- cbind(y.full.dredge,coef(y.full.dredge))
+
+head(occ.mod.sel)
+getwd()
+#write.csv(occ.mod.sel,"occ.mod.sel.csv")
+
+```
+
+
+
+
+If I understand this right I can show both the individual models for eahc of my covariates to demonstrate their effects,
+and still show my model selection to show the most appropriate model. So, what I am going to do here is create constant
+detection models for each covariate for occupancy and relative habitat use.
+
+Occupancy
+Fire
+```{r}
+
+ys.d.1.Fi <- occu(~1 ~ Fire, data = ys.deerocc)
+pred.rep <- data.frame(Fire = c(0,1))
+pred.rep$Fire <- as.factor(pred.rep$Fire)
+
+occ.fi.pred <- predict(ys.d.1.Fi, type = "state", newdata = pred.rep, append = TRUE)
+occ.fi.pred
+
+occ.fi.pred |> ggplot(aes(Fire, Predicted))+
+  geom_col(fill = "grey") + geom_errorbar(aes(x=Fire, ymin = lower,
+                                ymax = upper), width = 0.2) + 
+  theme_classic()
+
+
+0.78/0.63
+# times greater occupancy in burned than unburned areas
+
+```
+
+Forest
+```{r}
+
+ys.d.1.Fo <- occu(~1 ~ Forest, data = ys.deerocc)
+pred.rep <- data.frame(Forest = c("A", "J", "M"))
+pred.rep$Forest <- as.factor(pred.rep$Forest)
+
+occ.fo.pred <- predict(ys.d.1.Fo, type = "state", newdata = pred.rep, append = TRUE)
+occ.fo.pred
+
+occ.fo.pred |> ggplot(aes(Forest, Predicted))+
+  geom_col(fill = "grey") + geom_errorbar(aes(x=Forest, ymin = lower,
+                                ymax = upper), width = 0.2) + 
+  theme_classic()
+
+```
+
+Years post fire
+```{r}
+
+ys.d.1.Yf <- occu(~1 ~ Years_PostFire, data = ys.deerocc)
+pred.rep <- data.frame(Years_PostFire = c(2,3,4,5))
+pred.rep$Years_PostFire <- as.factor(pred.rep$Years_PostFire)
+
+occ.Yf.pred <- predict(ys.d.1.Yf, type = "state", newdata = pred.rep, append = TRUE)
+occ.Yf.pred
+
+occ.Yf.pred |> ggplot(aes(Years_PostFire, Predicted))+
+  geom_col(fill = "grey") + geom_errorbar(aes(x=Years_PostFire, ymin = lower,
+                                ymax = upper), width = 0.2) + 
+  theme_classic()
+
+```
+
+Relative Habitat Use
+Fire
+
+```{r}
+
+ys.rn.1.Fi <- occuRN(~1 ~ Fire, data = ys.deerocc)
+pred.rep <- data.frame(Fire = c(0,1))
+pred.rep$Fire <- as.factor(pred.rep$Fire)
+
+rn.fi.pred <- predict(ys.rn.1.Fi, type = "state", newdata = pred.rep, append = TRUE)
+rn.fi.pred
+
+rn.fi.pred |> ggplot(aes(Fire, Predicted))+
+  geom_col(fill = "grey") + geom_errorbar(aes(x=Fire, ymin = lower,
+                                ymax = upper), width = 0.2) + 
+  theme_classic()
+
+```
+
+Forest
+
+```{r}
+
+ys.rn.1.Fo <- occuRN(~1 ~ Forest, data = ys.deerocc)
+pred.rep <- data.frame(Forest = c("A", "J", "M"))
+pred.rep$Forest <- as.factor(pred.rep$Forest)
+
+rn.fo.pred <- predict(ys.rn.1.Fo, type = "state", newdata = pred.rep, append = TRUE)
+rn.fo.pred
+
+rn.fo.pred |> ggplot(aes(Forest, Predicted))+
+  geom_col(fill = "grey") + geom_errorbar(aes(x=Forest, ymin = lower,
+                                ymax = upper), width = 0.2) + 
+  theme_classic()
+
+```
+
+Years Postfire
+
+```{r}
+
+ys.rn.1.Yf <- occuRN(~1 ~ Years_PostFire, data = ys.deerocc)
+pred.rep <- data.frame(Years_PostFire = c(2,3,4,5))
+pred.rep$Years_PostFire <- as.factor(pred.rep$Years_PostFire)
+
+rn.Yf.pred <- predict(ys.rn.1.Yf, type = "state", newdata = pred.rep, append = TRUE)
+rn.Yf.pred
+
+rn.Yf.pred |> ggplot(aes(Years_PostFire, Predicted))+
+  geom_col(fill = "grey") + geom_errorbar(aes(x=Years_PostFire, ymin = lower,
+                                ymax = upper), width = 0.2) + 
+  theme_classic()
+
+```
+
+
 
 
