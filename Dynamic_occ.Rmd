@@ -1,0 +1,237 @@
+---
+title: "Dynamic_occ_mod"
+author: "R Pienaar"
+date: "`r Sys.Date()`"
+output: word_document
+---
+
+```{r}
+
+library(unmarked)
+library(camtrapR)
+
+```
+Load data
+```{r}
+
+ct <- read.csv("C:/Users/ryanp/Documents/Dissertation/Chapter4_Camera traps/Camelot Exports/Record Tables/ct_summary.csv")
+head(ct)
+
+data <- read.csv("C:/Users/ryanp/Documents/Dissertation/Chapter4_Camera traps/Camelot Exports/Record Tables/Record_table_mainpulated.csv")
+head(data)
+
+```
+
+create a detection history
+```{r}
+camop <- cameraOperation(CTtable      = ct,
+                                    stationCol   = "Station",
+                                    sessionCol = "Session",
+                                    setupCol     = "Setup_date",
+                                    retrievalCol = "Retrieval_date",
+                                    hasProblems  = FALSE,
+                                    dateFormat   = "mdy")
+
+# without trapping effort
+DetHist1 <- detectionHistory(recordTable         = data,
+                            camOp                = camop,
+                           species = "Odocoileus hemionus",
+                            stationCol = "Station",
+                            speciesCol = "Species",
+                            recordDateTimeCol = "Date",
+                            recordDateTimeFormat = "mdy",
+                            occasionLength = 14,
+                            scaleEffort = FALSE,
+                            timeZone = "MST",
+                            day1 = "survey",
+                            unmarkedMultFrameInput = TRUE)
+
+deerdh<- DetHist1$detection_history       
+deerdh
+
+```
+
+Create covariate data
+
+```{r}
+
+effort <- DetHist1$effort
+head(effort)
+
+YPF <- effort
+
+YPF[,1:25] <- 2
+YPF[,26:50] <- 3
+YPF[,51:75] <- 4
+YPF[,76:100] <- 5
+
+obs_cov <- list(effort = effort,
+                YPF = YPF)
+
+
+  
+Forest <- as.data.frame(substr(rownames(deerdh),5,5))
+Fire <- as.data.frame(substr(rownames(deerdh),7,7))
+
+site_cov <-  cbind(Forest, Fire)
+colnames(site_cov) <- c("Forest", "Fire")
+site_cov$Fire <- as.factor(site_cov$Fire)
+site_cov$Forest <- as.factor(site_cov$Forest)
+
+```
+
+Create unmarked frame
+
+```{r}
+
+deer_umf <- unmarkedMultFrame(y=as.matrix(deerdh),
+                              obsCovs = obs_cov,
+                              siteCovs = site_cov,
+                              numPrimary = 4)
+
+summary(deer_umf)
+
+```
+
+
+Run Some Models!
+
+First find optimal detection model
+```{r}
+
+
+### Null everything model
+deer.dy.occ.null <- colext(psiformula = ~1, # Occupancy,
+                           gammaformula = ~1, # Colonization
+                           epsilonformula = ~1, # Extinction
+                           pformula = ~1, # Detection
+                           data = deer_umf)  
+
+### Different detection models
+
+#Iterative forward stepwise selection
+
+deer.dy.occ.1 <- colext(psiformula = ~1, # Occupancy,
+                           gammaformula = ~1, # Colonization
+                           epsilonformula = ~1, # Extinction
+                           pformula = ~ effort, # Detection
+                           data = deer_umf) 
+
+deer.dy.occ.2 <- colext(psiformula = ~1, # Occupancy,
+                           gammaformula = ~1, # Colonization
+                           epsilonformula = ~1, # Extinction
+                           pformula = ~ effort + Fire, # Detection
+                           data = deer_umf)  
+
+deer.dy.occ.3 <- colext(psiformula = ~1, # Occupancy,
+                           gammaformula = ~1, # Colonization
+                           epsilonformula = ~1, # Extinction
+                           pformula = ~ effort * Fire , # Detection
+                           data = deer_umf)  
+
+deer.dy.occ.4 <- colext(psiformula = ~1, # Occupancy,
+                           gammaformula = ~1, # Colonization
+                           epsilonformula = ~1, # Extinction
+                           pformula = ~ effort * Fire + Forest , # Detection
+                           data = deer_umf)  
+
+deer.dy.occ.5 <- colext(psiformula = ~1, # Occupancy,
+                           gammaformula = ~1, # Colonization
+                           epsilonformula = ~1, # Extinction
+                           pformula = ~ effort * Fire * Forest , # Detection
+                           data = deer_umf) 
+
+deer.dy.occ.6 <- colext(psiformula = ~1, # Occupancy,
+                           gammaformula = ~1, # Colonization
+                           epsilonformula = ~1, # Extinction
+                           pformula = ~ effort * Fire * Forest + YPF , # Detection
+                           data = deer_umf) 
+
+deer.dy.occ.7 <- colext(psiformula = ~1, # Occupancy,
+                           gammaformula = ~1, # Colonization
+                           epsilonformula = ~1, # Extinction
+                           pformula = ~ effort * Fire * Forest * YPF , # Detection
+                           data = deer_umf) 
+
+#Iterative backward stepwise selection
+
+deer.dy.occ.8 <- colext(psiformula = ~1, # Occupancy,
+                           gammaformula = ~1, # Colonization
+                           epsilonformula = ~1, # Extinction
+                           pformula = ~  Fire * Forest + YPF , # Detection
+                           data = deer_umf) 
+
+deer.dy.occ.9 <- colext(psiformula = ~1, # Occupancy,
+                           gammaformula = ~1, # Colonization
+                           epsilonformula = ~1, # Extinction
+                           pformula = ~ Forest + YPF , # Detection
+                           data = deer_umf) 
+
+deer.dy.occ.10 <- colext(psiformula = ~1, # Occupancy,
+                           gammaformula = ~1, # Colonization
+                           epsilonformula = ~1, # Extinction
+                           pformula = ~ Fire + YPF , # Detection
+                           data = deer_umf) 
+
+deer.dy.occ.11 <- colext(psiformula = ~1, # Occupancy,
+                           gammaformula = ~1, # Colonization
+                           epsilonformula = ~1, # Extinction
+                           pformula = ~ Fire * Forest, # Detection
+                           data = deer_umf) 
+
+
+
+### Stepwise regression ####
+mod.sel <- modSel(fitList(deer.dy.occ.null, deer.dy.occ.1, deer.dy.occ.2, deer.dy.occ.3, deer.dy.occ.4, deer.dy.occ.5,
+                          deer.dy.occ.6, deer.dy.occ.7, deer.dy.occ.8, deer.dy.occ.9, deer.dy.occ.10, deer.dy.occ.11))
+mod.sel
+
+### Best detection model = deer.dy.occ.8 (Fire * Forest + YPF)
+summary(deer.dy.occ.8)
+
+```
+
+Get best extinction model
+
+```{r}
+
+#Null model for extinciton (is the optimal model from detection)
+deer.ext.null <- colext(psiformula = ~1, # Occupancy,
+                           gammaformula = ~1, # Colonization
+                           epsilonformula = ~1, # Extinction
+                           pformula = ~  Fire * Forest + YPF , # Detection
+                           data = deer_umf) 
+
+#### Forward stepwise iterative selection for extinction
+deer.ext.1 <- colext(psiformula = ~1, # Occupancy,
+                           gammaformula = ~1, # Colonization
+                           epsilonformula = ~ Fire, # Extinction
+                           pformula = ~  Fire * Forest + YPF , # Detection
+                           data = deer_umf) 
+
+deer.ext.2 <- colext(psiformula = ~1, # Occupancy,
+                           gammaformula = ~1, # Colonization
+                           epsilonformula = ~ Fire + Forest, # Extinction
+                           pformula = ~  Fire * Forest + YPF , # Detection
+                           data = deer_umf) 
+
+deer.ext.3 <- colext(psiformula = ~1, # Occupancy,
+                           gammaformula = ~1, # Colonization
+                           epsilonformula = ~ Fire * Forest, # Extinction
+                           pformula = ~  Fire * Forest + YPF , # Detection
+                           data = deer_umf) 
+
+deer.ext.4 <- colext(psiformula = ~1, # Occupancy,
+                           gammaformula = ~1, # Colonization
+                           epsilonformula = ~ Fire + Forest + effort, # Extinction
+                           pformula = ~  Fire * Forest + YPF , # Detection
+                           data = deer_umf) 
+
+
+### Model Selection
+deer.ext.sel <- modSel(fitList(deer.ext.null, deer.ext.1,deer.ext.2, deer.ext.3))
+deer.ext.sel
+
+```
+
+
