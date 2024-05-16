@@ -9,10 +9,16 @@ output: word_document
 
 library(unmarked)
 library(camtrapR)
+library(ggplot2)
+library(tidyverse)
+library(AICcmodavg)
+
 
 ```
 Load data
 ```{r}
+
+windowsFonts(A = windowsFont("Times New Roman"))
 
 ct <- read.csv("C:/Users/ryanp/Documents/Dissertation/Chapter4_Camera traps/Camelot Exports/Record Tables/ct_summary.csv")
 head(ct)
@@ -47,7 +53,7 @@ DetHist1 <- detectionHistory(recordTable         = data,
                             unmarkedMultFrameInput = TRUE)
 
 deerdh<- DetHist1$detection_history       
-deerdh
+
 
 ```
 
@@ -68,7 +74,7 @@ YPF[,76:100] <- 5
 obs_cov <- list(effort = effort,
                 YPF = YPF)
 
-
+YSC <- list(YPF=YPF)
   
 Forest <- as.data.frame(substr(rownames(deerdh),5,5))
 Fire <- as.data.frame(substr(rownames(deerdh),7,7))
@@ -83,10 +89,12 @@ site_cov$Forest <- as.factor(site_cov$Forest)
 Create unmarked frame
 
 ```{r}
-
-deer_umf <- unmarkedMultFrame(y=as.matrix(deerdh),
+mat <- matrix(c(rep(2, 32), rep(3, 32), rep(4, 32), rep(5, 32)), nrow = 32, byrow = FALSE)
+YSC <- list(years=mat)
+deer_umf <- unmarkedMultFrame(y= deerdh,
                               obsCovs = obs_cov,
                               siteCovs = site_cov,
+                              yearlySiteCovs = YSC,
                               numPrimary = 4)
 
 summary(deer_umf)
@@ -120,74 +128,163 @@ deer.dy.occ.1 <- colext(psiformula = ~1, # Occupancy,
 deer.dy.occ.2 <- colext(psiformula = ~1, # Occupancy,
                            gammaformula = ~1, # Colonization
                            epsilonformula = ~1, # Extinction
-                           pformula = ~ effort + Fire, # Detection
+                           pformula = ~ Fire, # Detection
                            data = deer_umf)  
 
 deer.dy.occ.3 <- colext(psiformula = ~1, # Occupancy,
                            gammaformula = ~1, # Colonization
                            epsilonformula = ~1, # Extinction
-                           pformula = ~ effort * Fire , # Detection
+                           pformula = ~ Forest, # Detection
                            data = deer_umf)  
 
 deer.dy.occ.4 <- colext(psiformula = ~1, # Occupancy,
                            gammaformula = ~1, # Colonization
                            epsilonformula = ~1, # Extinction
-                           pformula = ~ effort * Fire + Forest , # Detection
+                           pformula = ~ years, # Detection
                            data = deer_umf)  
 
 deer.dy.occ.5 <- colext(psiformula = ~1, # Occupancy,
                            gammaformula = ~1, # Colonization
                            epsilonformula = ~1, # Extinction
-                           pformula = ~ effort * Fire * Forest , # Detection
+                           pformula = ~ Forest * Fire, # Detection
                            data = deer_umf) 
 
 deer.dy.occ.6 <- colext(psiformula = ~1, # Occupancy,
                            gammaformula = ~1, # Colonization
                            epsilonformula = ~1, # Extinction
-                           pformula = ~ effort * Fire * Forest + YPF , # Detection
+                           pformula = ~ Forest * Fire * years, # Detection
                            data = deer_umf) 
 
 deer.dy.occ.7 <- colext(psiformula = ~1, # Occupancy,
                            gammaformula = ~1, # Colonization
                            epsilonformula = ~1, # Extinction
-                           pformula = ~ effort * Fire * Forest * YPF , # Detection
+                           pformula = ~ Forest * Fire * years + effort, # Detection
                            data = deer_umf) 
 
-#Iterative backward stepwise selection
 
-deer.dy.occ.8 <- colext(psiformula = ~1, # Occupancy,
-                           gammaformula = ~1, # Colonization
-                           epsilonformula = ~1, # Extinction
-                           pformula = ~  Fire * Forest + YPF , # Detection
-                           data = deer_umf) 
-
-deer.dy.occ.9 <- colext(psiformula = ~1, # Occupancy,
-                           gammaformula = ~1, # Colonization
-                           epsilonformula = ~1, # Extinction
-                           pformula = ~ Forest + YPF , # Detection
-                           data = deer_umf) 
-
-deer.dy.occ.10 <- colext(psiformula = ~1, # Occupancy,
-                           gammaformula = ~1, # Colonization
-                           epsilonformula = ~1, # Extinction
-                           pformula = ~ Fire + YPF , # Detection
-                           data = deer_umf) 
-
-deer.dy.occ.11 <- colext(psiformula = ~1, # Occupancy,
-                           gammaformula = ~1, # Colonization
-                           epsilonformula = ~1, # Extinction
-                           pformula = ~ Fire * Forest, # Detection
-                           data = deer_umf) 
 
 
 
 ### Stepwise regression ####
-mod.sel <- modSel(fitList(deer.dy.occ.null, deer.dy.occ.1, deer.dy.occ.2, deer.dy.occ.3, deer.dy.occ.4, deer.dy.occ.5,
-                          deer.dy.occ.6, deer.dy.occ.7, deer.dy.occ.8, deer.dy.occ.9, deer.dy.occ.10, deer.dy.occ.11))
+mod.sel <- modSel(fitList(deer.dy.occ.null, deer.dy.occ.1, deer.dy.occ.2, deer.dy.occ.3, deer.dy.occ.4, deer.dy.occ.6, deer.dy.occ.7))
 mod.sel
 
-### Best detection model = deer.dy.occ.8 (Fire * Forest + YPF)
-summary(deer.dy.occ.8)
+summary(deer.dy.occ.7)
+
+### Best detection model = deer.dy.occ.7 (Fire * Forest * years + effort)
+
+```
+
+Best occupancy model
+
+```{r}
+
+#NUll Occupancy model is best model form colonization
+deer.occ.null <- colext(psiformula = ~1, # Occupancy,
+                           gammaformula = ~1, # Colonization
+                           epsilonformula = ~1, # Extinction
+                           pformula = ~ Forest * Fire * years + effort, # Detection
+                           data = deer_umf) 
+
+#### Forward iterative stepwise selection
+deer.occ.1 <- colext(psiformula = ~ Forest, # Occupancy,
+                           gammaformula = ~1, # Colonization
+                           epsilonformula = ~1, # Extinction
+                           pformula = ~ Forest * Fire * years + effort, # Detection
+                           data = deer_umf) 
+
+deer.occ.2 <- colext(psiformula = ~ Fire, # Occupancy,
+                           gammaformula = ~1, # Colonization
+                           epsilonformula = ~1, # Extinction
+                           pformula = ~ Forest * Fire * years + effort, # Detection
+                           data = deer_umf) 
+
+
+
+deer.occ.3 <- colext(psiformula = ~ Forest * Fire, # Occupancy,
+                           gammaformula = ~1, # Colonization
+                           epsilonformula = ~1, # Extinction
+                           pformula = ~ Forest * Fire * years + effort, # Detection
+                           data = deer_umf)  
+
+
+
+
+# Model Selection
+deer.occ.sel <- modSel(fitList(deer.occ.null, deer.occ.1, deer.occ.2, deer.occ.3))
+deer.occ.sel
+#Best model deer.occ.null (1)
+
+```
+
+Find best colonization model
+
+```{r}
+
+#### NUll colonization model is best extinction model
+deer.col.null <- colext(psiformula = ~1, # Occupancy,
+                           gammaformula = ~1, # Colonization
+                           epsilonformula = ~1, # Extinction
+                           pformula = ~ Forest * Fire * years + effort, # Detection
+                           data = deer_umf)
+
+### Setpwise forward iterative selection for colonization
+deer.col.1 <- colext(psiformula = ~1, # Occupancy,
+                           gammaformula = ~ years, # Colonization
+                           epsilonformula = ~1, # Extinction
+                           pformula = ~ Forest * Fire * years + effort, # Detection
+                           data = deer_umf)
+
+deer.col.2 <- colext(psiformula = ~1, # Occupancy,
+                           gammaformula = ~ Forest, # Colonization
+                           epsilonformula = ~1, # Extinction
+                           pformula = ~ Forest * Fire * years + effort, # Detection
+                           data = deer_umf)
+
+deer.col.3 <- colext(psiformula = ~1, # Occupancy,
+                           gammaformula = ~ Fire, # Colonization
+                           epsilonformula = ~1, # Extinction
+                           pformula = ~ Forest * Fire * years + effort, # Detection
+                           data = deer_umf)
+
+deer.col.4 <- colext(psiformula = ~1, # Occupancy,
+                           gammaformula = ~ Forest * Fire, # Colonization
+                           epsilonformula = ~1, # Extinction
+                           pformula = ~ Forest * Fire * years + effort, # Detection
+                           data = deer_umf)
+
+deer.col.5 <- colext(psiformula = ~1, # Occupancy,
+                           gammaformula = ~Forest * Fire * years, # Colonization
+                           epsilonformula = ~1, # Extinction
+                           pformula = ~ Forest * Fire * years + effort, # Detection
+                           data = deer_umf)
+
+deer.col.6 <- colext(psiformula = ~1, # Occupancy,
+                           gammaformula = ~ years + Forest, # Colonization
+                           epsilonformula = ~1, # Extinction
+                           pformula = ~ Forest * Fire * years + effort, # Detection
+                           data = deer_umf)
+
+deer.col.7 <- colext(psiformula = ~1, # Occupancy,
+                           gammaformula = ~ years + Fire, # Colonization
+                           epsilonformula = ~1, # Extinction
+                           pformula = ~ Forest * Fire * years + effort, # Detection
+                           data = deer_umf)
+
+
+deer.col.8 <- colext(psiformula = ~1, # Occupancy,
+                           gammaformula = ~ years + Forest * Fire, # Colonization
+                           epsilonformula = ~1, # Extinction
+                           pformula = ~ Forest * Fire * years + effort, # Detection
+                           data = deer_umf)
+
+
+
+deer.col.sel <- modSel(fitList(deer.col.null, deer.col.1, deer.col.2, deer.col.3, deer.col.4, deer.col.5, 
+                               deer.col.6, deer.col.7, deer.col.8))
+deer.col.sel
+
+#Best model deer.col.8 ((years+Forest*years))
 
 ```
 
@@ -197,41 +294,334 @@ Get best extinction model
 
 #Null model for extinciton (is the optimal model from detection)
 deer.ext.null <- colext(psiformula = ~1, # Occupancy,
-                           gammaformula = ~1, # Colonization
+                           gammaformula = ~ years + Forest * Fire, # Colonization
                            epsilonformula = ~1, # Extinction
-                           pformula = ~  Fire * Forest + YPF , # Detection
-                           data = deer_umf) 
+                           pformula = ~ Forest * Fire * years + effort, # Detection
+                           data = deer_umf)
 
 #### Forward stepwise iterative selection for extinction
 deer.ext.1 <- colext(psiformula = ~1, # Occupancy,
-                           gammaformula = ~1, # Colonization
-                           epsilonformula = ~ Fire, # Extinction
-                           pformula = ~  Fire * Forest + YPF , # Detection
+                           gammaformula = ~ years + Forest * Fire, # Colonization
+                           epsilonformula = ~ years, # Extinction
+                           pformula = ~ Forest * Fire * years + effort, # Detection
                            data = deer_umf) 
 
 deer.ext.2 <- colext(psiformula = ~1, # Occupancy,
-                           gammaformula = ~1, # Colonization
-                           epsilonformula = ~ Fire + Forest, # Extinction
-                           pformula = ~  Fire * Forest + YPF , # Detection
+                           gammaformula = ~ years + Forest * Fire, # Colonization
+                           epsilonformula = ~ Forest, # Extinction
+                           pformula = ~ Forest * Fire * years + effort, # Detection
                            data = deer_umf) 
 
 deer.ext.3 <- colext(psiformula = ~1, # Occupancy,
-                           gammaformula = ~1, # Colonization
-                           epsilonformula = ~ Fire * Forest, # Extinction
-                           pformula = ~  Fire * Forest + YPF , # Detection
+                           gammaformula = ~ years + Forest * Fire, # Colonization
+                           epsilonformula = ~Fire, # Extinction
+                           pformula = ~ Forest * Fire * years + effort, # Detection
+                           data = deer_umf)
+
+deer.ext.4 <- colext(psiformula = ~1,  # Occupancy,
+                           gammaformula = ~ years + Forest * Fire, # Colonization
+                           epsilonformula = ~ Forest*Fire, # Extinction
+                           pformula = ~ Forest * Fire * years + effort, # Detection
+                           data = deer_umf)
+
+deer.ext.5 <- colext(psiformula = ~1, # Occupancy,
+                           gammaformula = ~ years + Forest * Fire, # Colonization
+                           epsilonformula = ~ Forest*Fire*years, # Extinction
+                           pformula = ~ Forest * Fire * years + effort, # Detection
                            data = deer_umf) 
 
-deer.ext.4 <- colext(psiformula = ~1, # Occupancy,
-                           gammaformula = ~1, # Colonization
-                           epsilonformula = ~ Fire + Forest + effort, # Extinction
-                           pformula = ~  Fire * Forest + YPF , # Detection
+deer.ext.6 <- colext(psiformula = ~1, # Occupancy,
+                           gammaformula = ~ years + Forest * Fire, # Colonization
+                           epsilonformula = ~ Forest + years, # Extinction
+                           pformula = ~  Forest * Fire * years + effort , # Detection
                            data = deer_umf) 
 
+deer.ext.7 <- colext(psiformula = ~1, # Occupancy,
+                           gammaformula = ~years + Forest * Fire, # Colonization
+                           epsilonformula = ~ Forest + Fire, # Extinction
+                           pformula = ~ Forest * Fire * years + effort , # Detection
+                           data = deer_umf) 
+
+deer.ext.8 <- colext(psiformula = ~1, # Occupancy,
+                           gammaformula = ~years + Forest * Fire, # Colonization
+                           epsilonformula = ~ Forest + Fire + years, # Extinction
+                           pformula = ~ Forest * Fire * years + effort , # Detection
+                           data = deer_umf) 
 
 ### Model Selection
-deer.ext.sel <- modSel(fitList(deer.ext.null, deer.ext.1,deer.ext.2, deer.ext.3))
+deer.ext.sel <- modSel(fitList(deer.ext.null, deer.ext.1,deer.ext.2, deer.ext.3, deer.ext.4, 
+                               deer.ext.5, deer.ext.6, deer.ext.7, deer.ext.8))
 deer.ext.sel
+
+### Best model is deer.ext.2 (Forest)
+
+
 
 ```
 
+
+
+
+Final Model
+
+```{r}
+
+#### Check the AIC values for colonization and extinction to average across both
+
+
+deer.avg <- deer.ext.2
+
+deer.psi <- predict(deer.avg, type = "psi")
+deer.ext <- predict(deer.avg, type = "ext")
+deer.col <- predict(deer.avg, type = "col")
+deer.det <- predict(deer.avg, type = "det")
+sites <- rownames(DetHist1$detection_history)
+row.names(deer.psi) <- sites
+
+deer.psi <- data.frame(deer.psi)
+
+deer.psi$site <- sites
+deer.psi$forest <- substr(deer.psi$site,5,5)
+deer.psi$fire <- substr(deer.psi$site,7,7)
+
+summary(deer.avg)
+
+```
+
+
+Occupancy graph
+
+```{r}
+
+
+
+ggplot(data = deer.psi, aes(y = Predicted, x= forest))+
+  geom_col(position = "dodge")+
+  geom_errorbar(aes(ymin = lower, ymax = upper),
+                width = 0.3, position = position_dodge(0.85))+
+  ylab("Predicted Occupancy")+
+  xlab(element_blank())+
+  scale_x_discrete(labels = c("Aspen Conifer", "Pinyon Juniper", "Oak Maple"))+
+  theme_classic()+
+  scale_y_continuous(expand = c(0, 0), limits = c(0, 1))+
+  theme(plot.title    = element_text(size=12, family = "serif", colour = "black"),
+        plot.subtitle = element_text(size=12, family = "serif", colour = "black"),
+        axis.title.x  = element_text(size=12, family = "serif", colour = "black"),
+        axis.title.y  = element_text(size=12, family = "serif", colour = "black"),
+        axis.text.x   = element_text(size=12, family = "serif", colour = "black"),
+        axis.text.y   = element_text(size=12, family = "serif", colour = "black"),
+        legend.text = element_text(size=12, family = "serif", colour = "black"),
+        legend.title = element_text(size=12, family = "serif", colour = "black"),
+        panel.border = element_blank())
+
+
+```
+
+Colonization graph
+
+```{r}
+
+head(deer.col)
+
+
+#### Create data labels
+
+site.years <-  rep(sites, each = 4)
+
+site.years <- data.frame(Site = site.years, YPF = rep(2:5, length.out = length(site.years)))
+
+deer.col <- cbind(deer.col, site.years)
+deer.col$forest <- substr(deer.col$Site,5,5)
+deer.col$fire <- substr(deer.col$Site,7,7)
+
+ggplot(data = deer.col[deer.col$YPF!=5,], aes(y = Predicted, x = YPF, fill =  forest))+
+  geom_col(position = "dodge")+
+  geom_errorbar(aes(ymin = Predicted-SE, ymax = Predicted + SE),
+                width = 0.3, position = position_dodge(0.85))+
+  theme_classic()+
+  ylab("Predicted Colonization")+
+  xlab("Years Since Fire")+
+  scale_y_continuous(expand = c(0, 0), limits = c(0, NA))+
+  guides(fill = guide_legend(title = "Forest Type"))+
+  scale_fill_hue(labels = c("Aspen Conifer", "Pinyon Juniper", "Oak Maple"))+
+  theme(plot.title    = element_text(size=12, family = "serif", colour = "black"),
+        plot.subtitle = element_text(size=12, family = "serif", colour = "black"),
+        axis.title.x  = element_text(size=12, family = "serif", colour = "black"),
+        axis.title.y  = element_text(size=12, family = "serif", colour = "black"),
+        axis.text.x   = element_text(size=12, family = "serif", colour = "black"),
+        axis.text.y   = element_text(size=12, family = "serif", colour = "black"),
+        legend.text = element_text(size=12, family = "serif", colour = "black"),
+        legend.title = element_text(size=12, family = "serif", colour = "black"),
+        panel.border = element_blank())
+
+
+```
+
+Create extinction graphs
+
+```{r}
+
+head(deer.ext)
+
+deer.ext <- cbind(deer.ext, site.years) 
+deer.ext$forest <- substr(deer.ext$Site,5,5)
+deer.ext$fire <- substr(deer.ext$Site,7,7)
+
+deer.ext[deer.ext$YPF!=5,] |> group_by(fire , forest)|>
+  summarise(Predicted = mean(Predicted), SE = mean(SE)) |>
+  ggplot( aes(x = fire, y = Predicted, fill = forest))+
+   geom_col(position = "dodge")+
+  geom_errorbar(aes(ymin = Predicted- SE, ymax = Predicted +SE),
+                width = 0.3, position = position_dodge(0.85))+
+  theme_classic() +
+  ylab("Predicted Extinction")+
+  xlab(element_blank())+
+  scale_y_continuous(expand = c(0, 0), limits = c(0, NA))+
+  scale_x_discrete(labels = c("Unburned", "Burned"))+
+  guides(fill = guide_legend(title = "Forest Type"))+
+  scale_fill_hue(labels = c("Aspen Conifer", "Pinyon Juniper", "Oak Maple"))+
+  theme(plot.title    = element_text(size=12, family = "serif", colour = "black"),
+        plot.subtitle = element_text(size=12, family = "serif"),
+        axis.title.x  = element_text(size=12, family = "serif", colour = "black"),
+        axis.title.y  = element_text(size=12, family = "serif", colour = "black"),
+        axis.text.x   = element_text(size=12, family = "serif", colour = "black"),
+        axis.text.y   = element_text(size=12, family = "serif", colour = "black"),
+        legend.text = element_text(size=12, family = "serif", colour = "black"),
+        legend.title = element_text(size=12, family = "serif", colour = "black"),
+        panel.border = element_blank())
+
+
+
+
+```
+
+Output tables Deer
+Model Selection Tables
+
+```{r}
+#Detection
+mod.sel
+mod.sel@Full[,c(1,2,38:44)]
+write.csv(mod.sel@Full[,c(1,2,38:44)], "deer.det.sel.csv")
+
+#Occupancy
+deer.occ.sel
+deer.occ.sel@Full[,c(1,2,48:54)]
+write.csv(deer.occ.sel@Full[,c(1,2,48:54)], "deer.occ.sel.csv")
+
+#Colonization
+deer.col.sel
+deer.col.sel@Full[, c(1,2,60:66)]
+write.csv(deer.col.sel@Full[, c(1,2,60:66)], "deer.col.sel.csv")
+
+#Extinction
+deer.ext.sel
+deer.ext.sel@Full[, c(1,2,72:78)]
+write.csv(deer.ext.sel@Full[, c(1,2,72:78)], "deer.ext.sel.csv")
+
+
+
+
+
+```
+Coefficients plot
+
+```{r}
+
+nd1 <- data.frame(Forest= "A", Fire=as.factor(1), years=c(2:5), effort=14)
+nd2 <- data.frame(Forest= "A", Fire=as.factor(0), years=c(2:5), effort=14)
+nd3 <- data.frame(Forest= "J", Fire=as.factor(1), years=c(2:5), effort=14)
+nd4 <- data.frame(Forest= "J", Fire=as.factor(0), years=c(2:5), effort=14)
+nd5 <- data.frame(Forest= "M", Fire=as.factor(1), years=c(2:5), effort=14)
+nd6 <- data.frame(Forest= "M", Fire=as.factor(0), years=c(2:5), effort=14)
+
+nd <- rbind(nd1,nd2,nd3,nd4,nd5,nd6)
+nd
+det.pred <- predict(deer.ext.2, type = "det", newdata = nd)
+det.pred <- cbind(nd,det.pred)
+
+det.pred
+
+
+ggplot(data = det.pred, aes(x= years, y =Predicted, colour = Forest))+
+  geom_smooth(aes(fill =Forest))+
+  theme_classic()
+
+ggplot(data = det.pred, aes(x= years, y =Predicted, colour = Fire))+
+  geom_smooth(aes(fill = Fire))+
+  theme_classic()
+
+```
+Colonization Prediction
+
+```{r}
+
+col.pred <- predict(deer.ext.2, type = "col", newdata = nd)
+col.pred <- cbind(nd, col.pred)
+col.pred
+
+
+
+ggplot(col.pred, aes(x = years, y = Predicted, color = Forest, shape = Fire, group = interaction(Forest, Fire))) +
+  geom_point(position = position_dodge(width = 0.2), size = 3) +  # Adjust position of points
+  geom_errorbar(aes(ymin = Predicted - SE, ymax = Predicted + SE), width = 0.2, position = position_dodge(width = 0.2)) +  # Add error bars
+  geom_smooth(aes(group = interaction(Forest, Fire)), position = position_dodge(width = 0.2)) +  # Add trendlines
+  theme_classic()+
+  ylab("Colonization") +
+  theme(plot.title    = element_text(size=12, family = "serif", colour = "black"),
+        plot.subtitle = element_text(size=12, family = "serif"),
+        axis.title.x  = element_text(size=12, family = "serif", colour = "black"),
+        axis.title.y  = element_text(size=12, family = "serif", colour = "black"),
+        axis.text.x   = element_text(size=12, family = "serif", colour = "black"),
+        axis.text.y   = element_text(size=12, family = "serif", colour = "black"),
+        legend.text   = element_text(size=12, family = "serif", colour = "black"),
+        legend.title  = element_text(size=12, family = "serif", colour = "black"),
+        panel.border  = element_blank())
+
+
+ggplot(col.pred, aes(x = years, y = Predicted, color = Forest, shape = Fire, group = interaction(Forest, Fire))) +
+  geom_point(position = position_dodge(width = 0.2), size = 3) +  # Adjust position of points
+  geom_errorbar(aes(ymin = pmax(Predicted - SE, 0), ymax = pmin(Predicted + SE, 1)), width = 0.2, position = position_dodge(width = 0.2)) +  # Add error bars limited to [0, 1]
+  geom_line(aes(group = interaction(Forest, Fire)), position = position_dodge(width = 0.2)) +  # Add trendlines
+  ylim(0, 1) +  # Set y-axis limits
+  theme_classic()
+
+```
+
+Extinction graph
+
+```{r}
+
+ext.pred <- predict(deer.ext.2, type = "ext", newdata = nd)
+ext.pred <- cbind(nd, ext.pred)
+ext.pred
+
+ggplot(data = ext.pred, aes(x= Forest, y =Predicted, colour = Forest))+
+  geom_point(size = 3)+
+  geom_errorbar(aes(ymin = lower, ymax = upper), width = 0.2)+
+  theme_classic()+
+  ylab("Extinction")+
+  theme(plot.title    = element_text(size=12, family = "serif", colour = "black"),
+        plot.subtitle = element_text(size=12, family = "serif"),
+        axis.title.x  = element_text(size=12, family = "serif", colour = "black"),
+        axis.title.y  = element_text(size=12, family = "serif", colour = "black"),
+        axis.text.x   = element_text(size=12, family = "serif", colour = "black"),
+        axis.text.y   = element_text(size=12, family = "serif", colour = "black"),
+        legend.text   = element_text(size=12, family = "serif", colour = "black"),
+        legend.title  = element_text(size=12, family = "serif", colour = "black"),
+        panel.border  = element_blank())
+
+```
+
+
+Model fit evaluation
+
+```{r}
+
+
+gf.best <- parboot(deer.ext.2, nsim = 100)
+gf.best
+plot(gf.best)
+
+```
 
