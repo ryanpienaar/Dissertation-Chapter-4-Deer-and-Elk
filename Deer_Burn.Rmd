@@ -1,0 +1,1467 @@
+---
+title: "deer_burn"
+author: "R Pienaar"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+
+Libraries
+
+```{r}
+# Load in libraries
+library(camtrapR)
+library(dplyr)
+library(ggplot2)
+library(devtools)
+library(unmarked)
+# Install autoOcc incase you have not yet
+# devtools::install_github(
+#   "mfidino/autoOcc",
+#   build_vignettes = TRUE
+# )
+library(autoOcc)
+library(extrafont)
+citation("autoOcc")
+
+
+```
+
+
+```{r}
+
+
+# Create a plots sub-folder as well to store figures
+#  from analysis
+dir.create("plots")
+getwd()
+# Set your local working directory and load in data that is stored
+#  in autoOcc package.
+
+
+#Load deer tables
+ct <- read.csv("C:/Users/ryanp/Documents/Dissertation/Chapter4_Camera traps/Camelot Exports/Record Tables/ct_summary.csv")
+head(ct)
+
+data <- read.csv("C:/Users/ryanp/Documents/Dissertation/Chapter4_Camera traps/Camelot Exports/Record Tables/Record_table_mainpulated.csv")
+head(data)
+
+# Create a detection history for each season
+camop <- cameraOperation(CTtable      = ct,
+                                    stationCol   = "Station",
+                                    sessionCol = "Session",
+                                    setupCol     = "Setup_date",
+                                    retrievalCol = "Retrieval_date",
+                                    hasProblems  = FALSE,
+                                    dateFormat   = "mdy")
+# without trapping effort
+DetHist1 <- detectionHistory(recordTable         = data,
+                            camOp                = camop,
+                           species = "Odocoileus hemionus",
+                            stationCol = "Station",
+                            speciesCol = "Species",
+                            recordDateTimeCol = "Date",
+                            recordDateTimeFormat = "mdy",
+                            occasionLength = 14,
+                            scaleEffort = FALSE,
+                            timeZone = "MST",
+                            day1 = "survey",
+                            unmarkedMultFrameInput = TRUE)
+
+deerdh <- DetHist1$detection_history
+head(deerdh)
+s1 <- deerdh[,1:25]
+#s1$season <- 1
+s2 <- deerdh[,26:50]
+#s2$season <- 2
+s3 <- deerdh[,51:75]
+#s3$season <- 3
+s4 <- deerdh[,76:100]
+#s4$season <- 4
+
+dh <- rbind(s1,s2,s3,s4)
+
+sequence <- rep(1:4, each = 32)
+dh <- as.data.frame(dh)
+dh$season<- sequence
+dh$site <- substr(row.names(dh),1,9)
+
+#Create covariates for each site
+deer_covariates <- as.data.frame(rownames(DetHist1$detection_history))
+deer_covariates$Forest <- substr(deer_covariates$`rownames(DetHist1$detection_history)`,5,5)
+deer_covariates$Fire <- substr(deer_covariates$`rownames(DetHist1$detection_history)`,7,7)
+
+colnames(deer_covariates) <- c("Site", "Forest", "Fire")
+
+# examine data
+head(opossum_det_hist) 
+head(dh)
+
+#Create a season column in DH
+
+length(rownames(dh))
+
+
+```
+
+```{r}
+
+
+##Deer
+deer_y <- format_y(
+  x = dh,
+  site_column = "site",
+  time_column = "season",
+  history_columns = 1:25
+)
+
+
+
+```
+
+Determine best detection model to be used to answer all questiona
+
+```{r}
+
+
+
+
+# make named list (don't worry about the warning)
+season_frame <- list(
+   Season = matrix(
+     dh$season,
+     ncol = dim(deer_y)[2],
+     nrow = dim(deer_y)[1]
+   ),
+   Forest = deer_covariates$Forest,
+   Fire = deer_covariates$Fire
+ )
+
+# modeling with no covariates
+pnull <- auto_occ(
+  formula = ~1  # detection
+            ~1, # occupancy
+  y = deer_y
+)
+
+
+
+#### Iterative models
+#### Original 3
+p1 <- auto_occ(
+      ~ Forest
+      ~1,
+      y= deer_y,
+      det_covs = season_frame
+)
+
+p2 <- auto_occ(
+      ~ Fire
+      ~1,
+      y= deer_y,
+      det_covs = season_frame
+)
+
+p3 <- auto_occ(
+      ~ Season
+      ~1,
+      y= deer_y,
+      det_covs = season_frame
+)
+
+# Comparing models
+detection.aic <- compare_models(
+  list(null = pnull,
+       Forest = p1,
+       Fire = p2,
+       Season = p3),
+  digits = 2
+)
+
+detection.aic
+
+#### First round best model is Forest
+### Add season and fire with additiive and interactive effects to forest
+
+p4 <- auto_occ(
+      ~ Forest + Fire
+      ~1,
+      y= deer_y,
+      det_covs = season_frame
+)
+
+p5 <- auto_occ(
+      ~ Forest * Fire
+      ~1,
+      y= deer_y,
+      det_covs = season_frame
+)
+
+p6 <- auto_occ(
+      ~ Forest + Season
+      ~1,
+      y= deer_y,
+      det_covs = season_frame
+)
+
+p7 <- auto_occ(
+      ~ Forest * Season
+      ~1,
+      y= deer_y,
+      det_covs = season_frame
+)
+
+detection.aic <- compare_models(
+  list(null = pnull,
+       Forest = p1,
+       Fire = p2,
+       Season = p3,
+       `Forest+Fire` = p4,
+       `Forest*Fire` = p5,
+       `Forest+Season` = p6,
+       `Forest*Season` =p7),
+  digits = 2
+)
+
+dfd.table <- detection.aic
+#write.csv(dfd.table,"Deer_Fire_Detection.csv")
+### Best model is model 7 Forest * Season acounting for 97% of the weight
+
+```
+
+
+Question 1
+How does occupancy change in response to fire across forest types?
+
+```{r}
+
+q1 <- auto_occ(
+  ~Forest * Season
+  ~ Forest * Fire,
+  y = deer_y,
+  det_covs = season_frame,
+  occ_covs = season_frame
+)
+
+
+summary(q1)
+
+
+
+nd1 <- data.frame(Forest= "A", Fire=as.factor(1))
+nd2 <- data.frame(Forest= "A", Fire=as.factor(0))
+nd3 <- data.frame(Forest= "J", Fire=as.factor(1))
+nd4 <- data.frame(Forest= "J", Fire=as.factor(0))
+nd5 <- data.frame(Forest= "M", Fire=as.factor(1))
+nd6 <- data.frame(Forest= "M", Fire=as.factor(0))
+
+nd <- rbind(nd1,nd2,nd3,nd4,nd5,nd6)
+nd
+
+q1.predict <- predict(q1, type = "psi", newdata = nd, se.fit= TRUE)
+q1.predict <- cbind(nd, q1.predict)
+q1.predict
+
+
+# Create the plot using the defined jitter position
+ggplot(data = q1.predict, aes(x = Forest, y = estimate, colour = Fire)) +
+  geom_point(size = 2, position = position_dodge(0.5)) +
+  geom_errorbar(aes(ymin = lower, ymax = upper), width = 0.2, position = position_dodge(0.5)) +
+  ylab("Deer Occupancy")+
+  theme_classic()+
+  theme(text = element_text(family = "serif", size = 12))+
+  scale_x_discrete(label = c("Aspen Conifer", 
+                             "Pinyon Juniper",
+                             "Oak Maple"))+
+  scale_color_discrete(labels = c("Burned", "Unburned"))+
+  theme(
+    text = element_text(family = "serif", size = 12),
+    axis.title = element_text(size = 12),
+    axis.text = element_text(size = 12),
+    legend.text = element_text(size = 12),
+    legend.title = element_text(size = 12),
+    plot.title = element_text(size = 12),
+    plot.subtitle = element_text(size = 12),
+    plot.caption = element_text(size = 12)
+  )+
+  ylim(0,1)
+
+
+
+```
+
+Question 2
+How does occupancy change in response to fire severity across forest types?
+
+
+```{r}
+
+#Create covariates for each site
+
+
+sev.df <- read.csv("C:/Users/ryanp/Documents/Dissertation/Chapter4_Camera traps/Dynamic_Occ/Chapter-4/FireSeverity.csv")
+sev.df <-sev.df[-c(27,28),]
+
+sev.df <- sev.df %>% replace(is.na(.), 0)
+
+deer_covariates$FireSev <- sev.df$Fire_severity
+head(deer_covariates)
+
+```
+
+Best detection for Fire Severity
+
+```{r}
+
+
+# make named list (don't worry about the warning)
+season_frame <- list(
+   Season = matrix(
+     dh$season,
+     ncol = dim(deer_y)[2],
+     nrow = dim(deer_y)[1]
+   ),
+   Forest = deer_covariates$Forest,
+   FireSev = deer_covariates$FireSev
+ )
+
+# modeling with no covariates
+pnull <- auto_occ(
+  formula = ~1  # detection
+            ~1, # occupancy
+  y = deer_y
+)
+
+
+#### Iterative models
+#### Original 3
+p1 <- auto_occ(
+      ~ Forest
+      ~1,
+      y= deer_y,
+      det_covs = season_frame
+)
+
+p2 <- auto_occ(
+      ~ FireSev
+      ~1,
+      y= deer_y,
+      det_covs = season_frame
+)
+
+p3 <- auto_occ(
+      ~ Season
+      ~1,
+      y= deer_y,
+      det_covs = season_frame
+)
+
+# Comparing models
+detection.aic <- compare_models(
+  list(null = pnull,
+       Forest = p1,
+       FireSev = p2,
+       Season = p3),
+  digits = 2
+)
+
+detection.aic
+
+#### First round best model is Forest
+### Add season and fire with additiive and interactive effects to forest
+
+p4 <- auto_occ(
+      ~ Forest + FireSev
+      ~1,
+      y= deer_y,
+      det_covs = season_frame
+)
+
+p5 <- auto_occ(
+      ~ Forest * FireSev
+      ~1,
+      y= deer_y,
+      det_covs = season_frame
+)
+
+p6 <- auto_occ(
+      ~ Forest + Season
+      ~1,
+      y= deer_y,
+      det_covs = season_frame
+)
+
+p7 <- auto_occ(
+      ~ Forest * Season
+      ~1,
+      y= deer_y,
+      det_covs = season_frame
+)
+
+# Comparing models
+detection.aic <- compare_models(
+  list(null = pnull,
+       Forest = p1,
+       FireSev = p2,
+       Season = p3,
+       `Forest+FireSev` = p4,
+       `Forest*FireSev` = p5,
+       `Forest+Season` = p6,
+       `Forest*Season` =p7),
+  digits = 2
+)
+
+dfsd <- detection.aic
+#write.csv(dfsd, "Deer_FireSev_Detection.csv")
+### Best model is model 7 Forest * Season acounting for 97% of the weight
+
+```
+
+Occupancy response to fire severity across fire types
+
+```{r}
+
+
+q2 <- auto_occ(
+  ~Forest * Season
+  ~ Forest * FireSev,
+  y = deer_y,
+  det_covs = season_frame,
+  occ_covs = season_frame
+)
+
+summary(q2)
+
+# nd1 <- data.frame(Forest= "A", Fire=as.factor(1), years=c(2:5), effort=14)
+# nd2 <- data.frame(Forest= "A", Fire=as.factor(0), years=c(2:5), effort=14)
+# nd3 <- data.frame(Forest= "J", Fire=as.factor(1), years=c(2:5), effort=14)
+# nd4 <- data.frame(Forest= "J", Fire=as.factor(0), years=c(2:5), effort=14)
+# nd5 <- data.frame(Forest= "M", Fire=as.factor(1), years=c(2:5), effort=14)
+# nd6 <- data.frame(Forest= "M", Fire=as.factor(0), years=c(2:5), effort=14)
+# 
+# nd <- rbind(nd1,nd2,nd3,nd4,nd5,nd6)
+# nd
+
+nd1 <- data.frame(Forest= "A", FireSev = c(0:4))
+
+nd3 <- data.frame(Forest= "J", FireSev= c(0:4))
+
+nd5 <- data.frame(Forest= "M", FireSev = c(0:4))
+
+
+nd <- rbind(nd1,nd3,nd5)
+nd
+
+q2.predict <- predict(q2, type = "psi", newdata = nd)
+q2.predict <- cbind(nd, q2.predict)
+q2.predict
+
+
+
+# Create the plot using the defined jitter position
+ggplot(data = q2.predict, aes(x = FireSev, y = estimate, colour = Forest)) +
+  geom_point(size = 2, position = position_dodge(0.5)) +
+  geom_line(position = position_dodge(0.5))+
+  geom_errorbar(aes(ymin = lower, ymax = upper), width = 0.2, position = position_dodge(0.5)) +
+  theme_classic()+
+  ylab("Deer Occupancy")+
+  theme(text = element_text(family = "serif", size = 12))+
+  scale_color_discrete(label = c("Aspen Conifer", 
+                             "Pinyon Juniper",
+                             "Oak Maple"))+
+  theme(
+    text = element_text(family = "serif", size = 12),
+    axis.title = element_text(size = 12),
+    axis.text = element_text(size = 12),
+    legend.text = element_text(size = 12),
+    legend.title = element_text(size = 12),
+    plot.title = element_text(size = 12),
+    plot.subtitle = element_text(size = 12),
+    plot.caption = element_text(size = 12)
+  )+
+  ylim(0,1)
+
+```
+
+
+Question 3
+How does occupancy vary across time in burned areas across forest types?
+This is where model selection comes in 
+
+Fitting models
+
+```{r}
+
+
+
+# make named list (don't worry about the warning)
+season_frame <- list(
+   Season = matrix(
+     dh$season,
+     ncol = dim(deer_y)[2],
+     nrow = dim(deer_y)[1]
+   ),
+   Forest = deer_covariates$Forest,
+   Fire = deer_covariates$Fire
+ )
+
+
+### Lets find the best occupancy model
+
+# Find best occupancy model
+psinull <- auto_occ(
+      ~ Forest* Season
+      ~1,
+      y= deer_y,
+      det_covs = season_frame,
+      occ_covs = season_frame
+)
+
+psi1 <- auto_occ(
+      ~ Forest* Season
+      ~ Forest,
+      y= deer_y,
+      det_covs = season_frame,
+      occ_covs = season_frame
+)
+
+psi2 <- auto_occ(
+      ~ Forest* Season
+      ~ Fire,
+      y= deer_y,
+      det_covs = season_frame,
+      occ_covs = season_frame
+)
+
+psi3 <- auto_occ(
+      ~ Forest* Season
+      ~ Season,
+      y= deer_y,
+      det_covs = season_frame,
+      occ_covs = season_frame
+)
+
+# Comparing models
+psi.aic <- compare_models(
+  list(null = psinull,
+       Forest = psi1,
+       FireSev = psi2,
+       Season = psi3),
+  digits = 2
+)
+
+psi.aic
+
+### Iterative selection round 2
+
+
+psi4 <- auto_occ(
+      ~ Forest* Season
+      ~ Forest + Fire,
+      y= deer_y,
+      det_covs = season_frame,
+      occ_covs = season_frame
+)
+
+
+
+psi5 <- auto_occ(
+      ~ Forest* Season
+      ~ Forest * Fire,
+      y= deer_y,
+      det_covs = season_frame,
+      occ_covs = season_frame
+)
+
+psi6 <- auto_occ(
+      ~ Forest* Season
+      ~ Forest + Season,
+      y= deer_y,
+      det_covs = season_frame,
+      occ_covs = season_frame
+)
+
+psi7 <- auto_occ(
+      ~ Forest* Season
+      ~ Forest * Season,
+      y= deer_y,
+      det_covs = season_frame,
+      occ_covs = season_frame
+)
+
+
+
+# Comparing models
+psi.aic <- compare_models(
+  list(null = psinull,
+       Forest = psi1,
+       Fire = psi2,
+       Season = psi3,
+       `Forest+Fire` = psi4,
+       `Forest*Fire` = psi5,
+       `Forest+Season` = psi6,
+       `Forest*Season` =psi7),
+  digits = 2
+)
+
+psi.aic
+
+variables <- list(
+  Forest = c("Forest*Season", "Forest", "Forest+Fire", "Forest+Season", "Forest*Fire"),
+  Season = c("Forest*Season", "Forest+Season", "Season"),
+  Fire = c("Forest+Fire", "Fire", "Forest*Fire")
+)
+
+#### Lots of top competing models
+
+#Calculate relative variable importance
+
+importance<- sapply(variables, function(models){
+  sum(psi.aic$AICwt[psi.aic$model %in% models])
+})
+
+importance <- as.data.frame(importance)
+importance$variable <- row.names(importance)
+
+
+ggplot(importance, aes(x = importance, y = variable)) +
+  geom_point(size = 3, color = "blue") +
+  geom_text(aes(label = importance), hjust = -0.2, size = 4) +
+  labs(x = "Relative Importance (w+)", y = "Variable", 
+       title = "Relative Variable Importance") +
+  theme_classic() +
+  xlim(0, 1)+
+  theme(
+    text = element_text(family = "serif", size = 12),
+    axis.title = element_text(size = 12),
+    axis.text = element_text(size = 12),
+    legend.text = element_text(size = 12),
+    legend.title = element_text(size = 12),
+    plot.title = element_text(size = 12),
+    plot.subtitle = element_text(size = 12),
+    plot.caption = element_text(size = 12)
+  )
+
+
+
+```
+
+Model Averaging
+
+```{r}
+
+# To model average, get the parameters in each model,
+# and set up a binary matrix to denote if they were present or not in that model.
+
+# create model list again
+model_list <- list(a=psinull,b=psi1,c=psi2,d=psi3,e=psi4,f=psi5,g=psi6,h=psi7)
+
+# and AIC results
+aic_results <- compare_models(
+  model_list
+)
+
+aic_results
+
+# reorder the model_list based on relative fit
+model_list <- model_list[aic_results$model]
+
+model_list
+
+
+aic_results$model
+# specify confidence interval width
+my_ci_width <- 0.95
+
+
+# get only the model parameters 
+parms <- lapply(
+  model_list,
+  function(x){
+    x@estimates$parameter
+  }
+)
+
+
+# select only unique parameters
+all_parms <- unique(
+  unlist(
+    parms
+  )
+)
+
+# make an empty matrix
+parm_matrix <- matrix(
+  0,
+  ncol = length(
+    all_parms
+  ),
+  nrow = length(
+    model_list
+  )
+)
+colnames(parm_matrix) <- all_parms
+
+# Add '1's to models which have parameter present
+for(i in 1:nrow(parm_matrix)){
+  parm_matrix[i, parms[[i]]] <- 1
+}
+
+# calculate overall weight for each parameter. The easiest
+#  way to do this is to make a weight matrix.
+weight_matrix <- matrix(
+  aic_results$AICwt,
+  nrow = length(model_list),
+  ncol = length(all_parms)
+)
+
+parm_weight <- colSums(
+  parm_matrix * weight_matrix
+)
+
+parm_weight
+
+#  We are going to take samples from the parameters (which
+#  is the same thing we do to make predictions
+#  via autoOcc::predict). To do that, we need
+#  to get the variance covariance matrix
+#  for each model.
+
+cov_mat <- lapply(
+  model_list,
+  vcov
+)
+
+# and now the estimates (assuming you are not
+# using any offsets in the model for this).
+
+ests <- lapply(
+  model_list,
+  function(x) x@estimates$Est
+)
+
+# do 5000 samples for each parameter.
+mvn_samps <- vector(
+  "list",
+  length = length(model_list)
+)
+nsim = 5000
+set.seed(465)
+for(i in 1:length(mvn_samps)){
+  mvn_samps[[i]] <- mvtnorm::rmvnorm(
+    nsim,
+    mean = ests[[i]],
+    sigma = cov_mat[[i]],
+    method = "svd"
+  )
+  colnames(mvn_samps[[i]]) <- parms[[i]]
+}
+
+# do model averaging for each parameter
+avg_parm <- data.frame(
+  parameter = all_parms,
+  est = NA,
+  lower = NA,
+  upper = NA
+)
+
+for(i in 1:nrow(avg_parm)){
+  my_parm <- avg_parm$parameter[i]
+  which_models <- which(
+    parm_matrix[,i] == 1
+  )
+  
+  weights <- weight_matrix[
+    which_models,i
+  ] * parm_matrix[
+    which_models,i
+  ]
+  
+  # get beta terms
+  beta_mat <- matrix(
+    NA,
+    ncol = length(which_models),
+    nrow = nsim
+  )
+  
+  # multiply weight across columns while we do this
+  for(j in 1:ncol(beta_mat)){
+    beta_mat[,j] <- mvn_samps[[which_models[j]]][,my_parm] *
+      weights[j]
+  }
+  
+  # sum each row
+  beta_mat <- rowSums(beta_mat)
+  
+  # divide by overall weight
+  beta_mat <- beta_mat / parm_weight[i]
+  
+  # summarise
+  avg_parm$est[i] <- median(beta_mat)
+  avg_parm$lower[i] <- quantile(
+    beta_mat,
+    (1 - my_ci_width) / 2
+  )
+  avg_parm$upper[i] <- quantile(
+    beta_mat,
+    1 - ( (1 - my_ci_width) / 2 )
+  )
+  
+}
+
+
+# get average estimate
+avg_parm %>% 
+  mutate(
+    across(
+      where(is.numeric), ~ round(., digits = 2))
+    )
+  
+avg_parm
+
+data_filtered <- avg_parm %>%
+  filter(!grepl("^rho", parameter))
+
+ggplot(data= data_filtered, aes(x = est, y = parameter)) +
+  geom_point() +
+  geom_errorbarh(aes(xmin = lower, xmax = upper), height = 0.2) +
+  labs(title = "Model averaging for Occupancy",
+       x = "Estimate",
+       y = "Parameter") +
+  theme_classic()+
+  theme(
+    text = element_text(family = "serif", size = 12),
+    axis.title = element_text(size = 12),
+    axis.text = element_text(size = 12),
+    legend.text = element_text(size = 12),
+    legend.title = element_text(size = 12),
+    plot.title = element_text(size = 12),
+    plot.subtitle = element_text(size = 12),
+    plot.caption = element_text(size = 12)
+  )
+
+
+```
+
+Predict occupancy
+
+```{r}
+
+
+#### Plot best model
+
+nd1 <- data.frame(Forest= "A", Season = c(1:4))
+
+nd3 <- data.frame(Forest= "J", Season = c(1:4))
+
+nd5 <- data.frame(Forest= "M", Season = c(1:4))
+
+
+nd <- rbind(nd1,nd3,nd5)
+nd
+
+pred.top <- predict(psi7, type = "psi", newdata = nd)
+pred.top <- cbind(nd, pred.top)
+
+head(pred.top)
+
+ggplot(data = pred.top, aes(y= estimate, x=Season, colour = Forest))+
+  geom_point(size = 2, position = position_dodge(0.2))+
+  geom_line(position = position_dodge(0.2))+
+  geom_errorbar(aes(ymin= lower, ymax = upper, width = 0.2), position = position_dodge(0.2))+
+  theme_classic()+
+  ylab("Deer Occupancy")+
+  theme(text = element_text(family = "serif", size = 12))+
+  scale_color_discrete(label = c("Aspen Conifer", 
+                             "Pinyon Juniper",
+                             "Oak Maple"))+
+  theme(
+    text = element_text(family = "serif", size = 12),
+    axis.title = element_text(size = 12),
+    axis.text = element_text(size = 12),
+    legend.text = element_text(size = 12),
+    legend.title = element_text(size = 12),
+    plot.title = element_text(size = 12),
+    plot.subtitle = element_text(size = 12),
+    plot.caption = element_text(size = 12)
+  )+
+  ylim(0,1)
+
+```
+
+Rerun model selection but with Fire Severity
+
+Fitting models
+
+```{r}
+
+
+
+# make named list (don't worry about the warning)
+season_frame <- list(
+   Season = matrix(
+     dh$season,
+     ncol = dim(deer_y)[2],
+     nrow = dim(deer_y)[1]
+   ),
+   Forest = deer_covariates$Forest,
+   FireSev = deer_covariates$FireSev
+ )
+
+
+### Lets find the best occupancy model
+
+# Find best occupancy model
+psinull <- auto_occ(
+      ~ Forest* Season
+      ~1,
+      y= deer_y,
+      det_covs = season_frame,
+      occ_covs = season_frame
+)
+
+psi1 <- auto_occ(
+      ~ Forest* Season
+      ~ Forest,
+      y= deer_y,
+      det_covs = season_frame,
+      occ_covs = season_frame
+)
+
+psi2 <- auto_occ(
+      ~ Forest* Season
+      ~ FireSev,
+      y= deer_y,
+      det_covs = season_frame,
+      occ_covs = season_frame
+)
+
+psi3 <- auto_occ(
+      ~ Forest* Season
+      ~ Season,
+      y= deer_y,
+      det_covs = season_frame,
+      occ_covs = season_frame
+)
+
+# Comparing models
+psi.aic <- compare_models(
+  list(null = psinull,
+       Forest = psi1,
+       FireSev = psi2,
+       Season = psi3),
+  digits = 2
+)
+
+psi.aic
+
+### Iterative selection round 2
+
+
+psi4 <- auto_occ(
+      ~ Forest* Season
+      ~ Forest + FireSev,
+      y= deer_y,
+      det_covs = season_frame,
+      occ_covs = season_frame
+)
+
+
+
+psi5 <- auto_occ(
+      ~ Forest* Season
+      ~ Forest * FireSev,
+      y= deer_y,
+      det_covs = season_frame,
+      occ_covs = season_frame
+)
+
+psi6 <- auto_occ(
+      ~ Forest* Season
+      ~ Forest + Season,
+      y= deer_y,
+      det_covs = season_frame,
+      occ_covs = season_frame
+)
+
+psi7 <- auto_occ(
+      ~ Forest* Season
+      ~ Forest * Season,
+      y= deer_y,
+      det_covs = season_frame,
+      occ_covs = season_frame
+)
+
+
+
+# Comparing models
+psi.aic <- compare_models(
+  list(null = psinull,
+       Forest = psi1,
+       Fire = psi2,
+       Season = psi3,
+       `Forest+FireSev` = psi4,
+       `Forest*FireSev` = psi5,
+       `Forest+Season` = psi6,
+       `Forest*Season` =psi7),
+  digits = 2
+)
+
+psi.aic
+
+variables <- list(
+  Forest = c("Forest*Season", "Forest", "Forest+FireSev", "Forest+Season", "Forest*FireSev"),
+  Season = c("Forest*Season", "Forest+Season", "Season"),
+  FireSev = c("Forest+FireSev", "FireSev", "Forest*FireSev")
+)
+
+#### Lots of top competing models
+
+#Calculate relative variable importance
+
+importance<- sapply(variables, function(models){
+  sum(psi.aic$AICwt[psi.aic$model %in% models])
+})
+
+importance <- as.data.frame(importance)
+importance$variable <- row.names(importance)
+
+
+ggplot(importance, aes(x = importance, y = variable)) +
+  geom_point(size = 3, color = "blue") +
+  geom_text(aes(label = importance), hjust = -0.2, size = 4) +
+  labs(x = "Relative Importance (w+)", y = "Variable", 
+       title = "Relative Variable Importance") +
+  theme_classic() +
+  xlim(0, 1)+
+  theme(
+    text = element_text(family = "serif", size = 12),
+    axis.title = element_text(size = 12),
+    axis.text = element_text(size = 12),
+    legend.text = element_text(size = 12),
+    legend.title = element_text(size = 12),
+    plot.title = element_text(size = 12),
+    plot.subtitle = element_text(size = 12),
+    plot.caption = element_text(size = 12)
+  )
+
+
+```
+
+Model Averaging
+
+```{r}
+
+# To model average, get the parameters in each model,
+# and set up a binary matrix to denote if they were present or not in that model.
+
+# create model list again
+model_list <- list(a=psinull,b=psi1,c=psi2,d=psi3,e=psi4,f=psi5,g=psi6,h=psi7)
+
+# and AIC results
+aic_results <- compare_models(
+  model_list
+)
+
+aic_results
+
+# reorder the model_list based on relative fit
+model_list <- model_list[aic_results$model]
+
+model_list
+
+
+aic_results$model
+# specify confidence interval width
+my_ci_width <- 0.95
+
+
+# get only the model parameters 
+parms <- lapply(
+  model_list,
+  function(x){
+    x@estimates$parameter
+  }
+)
+
+
+# select only unique parameters
+all_parms <- unique(
+  unlist(
+    parms
+  )
+)
+
+# make an empty matrix
+parm_matrix <- matrix(
+  0,
+  ncol = length(
+    all_parms
+  ),
+  nrow = length(
+    model_list
+  )
+)
+colnames(parm_matrix) <- all_parms
+
+# Add '1's to models which have parameter present
+for(i in 1:nrow(parm_matrix)){
+  parm_matrix[i, parms[[i]]] <- 1
+}
+
+# calculate overall weight for each parameter. The easiest
+#  way to do this is to make a weight matrix.
+weight_matrix <- matrix(
+  aic_results$AICwt,
+  nrow = length(model_list),
+  ncol = length(all_parms)
+)
+
+parm_weight <- colSums(
+  parm_matrix * weight_matrix
+)
+
+parm_weight
+
+#  We are going to take samples from the parameters (which
+#  is the same thing we do to make predictions
+#  via autoOcc::predict). To do that, we need
+#  to get the variance covariance matrix
+#  for each model.
+
+cov_mat <- lapply(
+  model_list,
+  vcov
+)
+
+# and now the estimates (assuming you are not
+# using any offsets in the model for this).
+
+ests <- lapply(
+  model_list,
+  function(x) x@estimates$Est
+)
+
+# do 5000 samples for each parameter.
+mvn_samps <- vector(
+  "list",
+  length = length(model_list)
+)
+nsim = 5000
+set.seed(465)
+for(i in 1:length(mvn_samps)){
+  mvn_samps[[i]] <- mvtnorm::rmvnorm(
+    nsim,
+    mean = ests[[i]],
+    sigma = cov_mat[[i]],
+    method = "svd"
+  )
+  colnames(mvn_samps[[i]]) <- parms[[i]]
+}
+
+# do model averaging for each parameter
+avg_parm <- data.frame(
+  parameter = all_parms,
+  est = NA,
+  lower = NA,
+  upper = NA
+)
+
+for(i in 1:nrow(avg_parm)){
+  my_parm <- avg_parm$parameter[i]
+  which_models <- which(
+    parm_matrix[,i] == 1
+  )
+  
+  weights <- weight_matrix[
+    which_models,i
+  ] * parm_matrix[
+    which_models,i
+  ]
+  
+  # get beta terms
+  beta_mat <- matrix(
+    NA,
+    ncol = length(which_models),
+    nrow = nsim
+  )
+  
+  # multiply weight across columns while we do this
+  for(j in 1:ncol(beta_mat)){
+    beta_mat[,j] <- mvn_samps[[which_models[j]]][,my_parm] *
+      weights[j]
+  }
+  
+  # sum each row
+  beta_mat <- rowSums(beta_mat)
+  
+  # divide by overall weight
+  beta_mat <- beta_mat / parm_weight[i]
+  
+  # summarise
+  avg_parm$est[i] <- median(beta_mat)
+  avg_parm$lower[i] <- quantile(
+    beta_mat,
+    (1 - my_ci_width) / 2
+  )
+  avg_parm$upper[i] <- quantile(
+    beta_mat,
+    1 - ( (1 - my_ci_width) / 2 )
+  )
+  
+}
+
+
+# get average estimate
+avg_parm %>% 
+  mutate(
+    across(
+      where(is.numeric), ~ round(., digits = 2))
+    )
+  
+avg_parm
+
+data_filtered <- avg_parm %>%
+  filter(!grepl("^rho", parameter))
+
+ggplot(data= data_filtered, aes(x = est, y = parameter)) +
+  geom_point() +
+  geom_errorbarh(aes(xmin = lower, xmax = upper), height = 0.2) +
+  labs(title = "Model averaging for Occupancy",
+       x = "Estimate",
+       y = "Parameter") +
+  theme_classic()+
+  theme(
+    text = element_text(family = "serif", size = 12),
+    axis.title = element_text(size = 12),
+    axis.text = element_text(size = 12),
+    legend.text = element_text(size = 12),
+    legend.title = element_text(size = 12),
+    plot.title = element_text(size = 12),
+    plot.subtitle = element_text(size = 12),
+    plot.caption = element_text(size = 12)
+  )
+
+```
+
+
+
+Predict occupancy
+
+```{r}
+
+
+#### Plot best model
+
+nd1 <- data.frame(Forest= "A", Season = c(1:4))
+
+nd3 <- data.frame(Forest= "J", Season = c(1:4))
+
+nd5 <- data.frame(Forest= "M", Season = c(1:4))
+
+
+nd <- rbind(nd1,nd3,nd5)
+nd
+
+pred.top <- predict(psi7, type = "psi", newdata = nd)
+pred.top <- cbind(nd, pred.top)
+
+
+ggplot(data = pred.top, aes(y= estimate, x=Season, colour = Forest))+
+  geom_point(size = 2, position = position_dodge(0.2))+
+  geom_line(position = position_dodge(0.2))+
+  geom_errorbar(aes(ymin = lower, ymax = upper), width = 0.2, position = position_dodge(0.2))+
+  theme_classic()+
+  ylab("Deer Occupancy")+
+  theme(text = element_text(family = "serif", size = 12))+
+  scale_color_discrete(label = c("Aspen Conifer", 
+                             "Pinyon Juniper",
+                             "Oak Maple"))+
+  theme(
+    text = element_text(family = "serif", size = 12),
+    axis.title = element_text(size = 12),
+    axis.text = element_text(size = 12),
+    legend.text = element_text(size = 12),
+    legend.title = element_text(size = 12),
+    plot.title = element_text(size = 12),
+    plot.subtitle = element_text(size = 12),
+    plot.caption = element_text(size = 12)
+  )+
+  ylim(0,1)
+
+
+```
+
+Isolate features to compare to the global model
+
+```{r}
+
+# make named list (don't worry about the warning)
+season_frame <- list(
+   Season = matrix(
+     dh$season,
+     ncol = dim(deer_y)[2],
+     nrow = dim(deer_y)[1]
+   ),
+   Forest = deer_covariates$Forest,
+   Fire = deer_covariates$Fire
+ )
+
+### Start with the interactions
+all.int <- auto_occ(
+      ~ Forest* Fire
+      ~ Forest * Season * Fire,
+      y= deer_y,
+      det_covs = season_frame,
+      occ_covs = season_frame
+)
+
+all.add <- auto_occ(
+      ~ Forest* Fire
+      ~ Forest + Season + Fire,
+      y= deer_y,
+      det_covs = season_frame,
+      occ_covs = season_frame
+)
+
+
+predict.int <- predict(all.int, type = "psi")
+predict.add <- predict(all.add, type = "psi")
+
+ggplot(data = predict.int, aes(x = Season, y= estimate, colour = Forest, shape = Fire))+ 
+  geom_point(size =3)+ 
+  geom_line()+
+  theme_classic()
+
+ggplot(data = predict.add, aes(x = Season, y= estimate, colour = Forest, shape = Fire))+ 
+  geom_point(size =3)+ 
+  geom_line()+
+  theme_classic()
+
+dh.sub <- dh
+dh.sub$Forest <- substr(dh.sub$site,5,5)
+dh.sub$Fire <- substr(dh.sub$site,7,7)
+
+aspen_y <- format_y(
+  x = dh.sub[dh.sub$Forest == "A",],
+  site_column = "site",
+  time_column = "season",
+  history_columns = 1:25
+)
+
+aspen.covariates <- deer_covariates[deer_covariates$Forest=="A",]
+
+### Test some models
+
+#aspen
+a1 <- auto_occ(
+      ~1
+      ~1,
+      y= aspen_y)
+
+aspen_frame <- list(
+   Season = matrix(c(rep(1, 12), rep(2, 12), rep(3, 12), rep(4, 12)), nrow = 12, ncol = 4),
+   Fire = aspen.covariates$Fire
+ )
+
+a7 <- auto_occ(
+      ~ Fire
+      ~ Season * Fire,
+      y= aspen_y,
+      det_covs = aspen_frame,
+      occ_covs = aspen_frame
+)
+
+aspen <- predict(a7, type = "psi")
+aspen
+
+ggplot(data = aspen, aes(x= Season, y = estimate, shape = Fire))+
+  geom_point(size = 3)+
+  geom_line()+ 
+  theme_classic()
+
+#juniper
+
+juniper_y <- format_y(
+  x = dh.sub[dh.sub$Forest == "J",],
+  site_column = "site",
+  time_column = "season",
+  history_columns = 1:25
+)
+
+juniper.covariates <- deer_covariates[deer_covariates$Forest=="J",]
+
+
+j1 <- auto_occ(
+      ~1
+      ~1,
+      y= juniper_y)
+
+juniper_frame <- list(
+   Season = matrix(c(rep(1, 12), rep(2, 12), rep(3, 12), rep(4, 12)), nrow = 12, ncol = 4),
+   Fire = juniper.covariates$Fire
+ )
+
+j7 <- auto_occ(
+      ~ Fire
+      ~ Season * Fire,
+      y= juniper_y,
+      det_covs = aspen_frame,
+      occ_covs = aspen_frame
+)
+
+juniper <- predict(j7, type = "psi")
+juniper
+
+ggplot(data = juniper, aes(x= Season, y = estimate, shape = Fire))+
+  geom_point(size = 3)+
+  geom_line()+ 
+  theme_classic()
+
+
+### Lets try this now with fire
+
+burned_y <- format_y(
+  x = dh.sub[dh.sub$Fire == 1,],
+  site_column = "site",
+  time_column = "season",
+  history_columns = 1:25
+)
+
+burned.covariates <- deer_covariates[deer_covariates$Fire==1,]
+
+### Test some models
+
+#aspen
+b1 <- auto_occ(
+      ~1
+      ~1,
+      y= burned_y)
+
+burned_frame <- list(
+   Season = matrix(c(rep(1, 12), rep(2, 12), rep(3, 12), rep(4, 12)), nrow = 16, ncol = 4),
+   Forest = burned.covariates$Forest
+ )
+
+b7 <- auto_occ(
+      ~ Forest
+      ~ Season * Forest,
+      y= burned_y,
+      det_covs = burned_frame,
+      occ_covs = burned_frame
+)
+
+burned <- predict(b7, type = "psi")
+burned
+
+ggplot(data = burned, aes(x= Season, y = estimate, color = Forest))+
+  geom_point(size = 3)+
+  geom_line()+ 
+  theme_classic()
+
+
+
+```
+
+
+
