@@ -5,6 +5,11 @@ date: "`r Sys.Date()`"
 output: html_document
 ---
 
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, fig.width = 5, fig.height = 4)
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+```
+
 
 Libraries
 
@@ -15,6 +20,8 @@ library(dplyr)
 library(ggplot2)
 library(devtools)
 library(unmarked)
+library(scales)
+library(lubridate)
 # Install autoOcc incase you have not yet
 # devtools::install_github(
 #   "mfidino/autoOcc",
@@ -25,19 +32,11 @@ library(extrafont)
 citation("autoOcc")
 
 
+
 ```
 
 
 ```{r}
-
-
-# Create a plots sub-folder as well to store figures
-#  from analysis
-dir.create("plots")
-getwd()
-# Set your local working directory and load in data that is stored
-#  in autoOcc package.
-
 
 #Load deer tables
 ct <- read.csv("C:/Users/ryanp/Documents/Dissertation/Chapter4_Camera traps/Camelot Exports/Record Tables/ct_summary.csv")
@@ -46,7 +45,7 @@ head(ct)
 data <- read.csv("C:/Users/ryanp/Documents/Dissertation/Chapter4_Camera traps/Camelot Exports/Record Tables/Record_table_mainpulated.csv")
 head(data)
 
-# Create a detection history for each season
+# Create a detection history for each Year
 camop <- cameraOperation(CTtable      = ct,
                                     stationCol   = "Station",
                                     sessionCol = "Session",
@@ -67,40 +66,71 @@ DetHist1 <- detectionHistory(recordTable         = data,
                             timeZone = "MST",
                             day1 = "survey",
                             unmarkedMultFrameInput = TRUE)
+DetHist1$detection_history
 
 deerdh <- DetHist1$detection_history
 head(deerdh)
 s1 <- deerdh[,1:25]
-#s1$season <- 1
+#s1$Year <- 1
 s2 <- deerdh[,26:50]
-#s2$season <- 2
+#s2$Year <- 2
 s3 <- deerdh[,51:75]
-#s3$season <- 3
+#s3$Year <- 3
 s4 <- deerdh[,76:100]
-#s4$season <- 4
+#s4$Year <- 4
 
 dh <- rbind(s1,s2,s3,s4)
 
 sequence <- rep(1:4, each = 32)
 dh <- as.data.frame(dh)
-dh$season<- sequence
+dh$Year<- sequence
 dh$site <- substr(row.names(dh),1,9)
 
 #Create covariates for each site
 deer_covariates <- as.data.frame(rownames(DetHist1$detection_history))
 deer_covariates$Forest <- substr(deer_covariates$`rownames(DetHist1$detection_history)`,5,5)
 deer_covariates$Fire <- substr(deer_covariates$`rownames(DetHist1$detection_history)`,7,7)
+dh$Year
+
+#### Create a list of seasons ####
+# Create the original list of dates
+start_date <- as.Date("2019-09-23")
+original_dates <- seq.Date(start_date, by = "14 days", length.out = 100)
+original_dates
+# Function to determine the season
+get_season <- function(date) {
+  month <- month(date)
+  if (month %in% c(11, 12, 1, 2)) {
+    return("Winter")
+  } else if (month %in% c(3, 4)) {
+    return("Spring")
+  } else if (month %in% c(5, 6, 7, 8)) {
+    return("Summer")
+  } else if (month %in% c(9, 10)) {
+    return("Fall")
+  }
+}
+
+# Create the new list of seasons
+seasons <- sapply(original_dates, get_season)
+
+# Print the list of seasons
+seasons
+
+########
 
 colnames(deer_covariates) <- c("Site", "Forest", "Fire")
 
 # examine data
-head(opossum_det_hist) 
 head(dh)
 
-#Create a season column in DH
+#Create a Year column in DH
 
 length(rownames(dh))
 
+#### SPecies Summaries ####
+speciessum<-  as.data.frame(table(data$Species))
+table(data$Station,data$Species)
 
 ```
 
@@ -111,7 +141,7 @@ length(rownames(dh))
 deer_y <- format_y(
   x = dh,
   site_column = "site",
-  time_column = "season",
+  time_column = "Year",
   history_columns = 1:25
 )
 
@@ -119,23 +149,25 @@ deer_y <- format_y(
 
 ```
 
-Determine best detection model to be used to answer all questiona
+Determine best detection model to be used to answer all questions
 
 ```{r}
 
-
-
-
 # make named list (don't worry about the warning)
-season_frame <- list(
-   Season = matrix(
-     dh$season,
+Year_frame <- list(
+   Year = matrix(
+     dh$Year,
      ncol = dim(deer_y)[2],
      nrow = dim(deer_y)[1]
    ),
    Forest = deer_covariates$Forest,
-   Fire = deer_covariates$Fire
+   Fire = deer_covariates$Fire,
+   Season = matrix(seasons,
+                   ncol = dim(deer_y)[2],
+     nrow = dim(deer_y)[1])
+                   
  )
+
 
 # modeling with no covariates
 pnull <- auto_occ(
@@ -145,87 +177,93 @@ pnull <- auto_occ(
 )
 
 
-
-#### Iterative models
-#### Original 3
 p1 <- auto_occ(
       ~ Forest
       ~1,
       y= deer_y,
-      det_covs = season_frame
+      det_covs = Year_frame
 )
 
 p2 <- auto_occ(
       ~ Fire
       ~1,
       y= deer_y,
-      det_covs = season_frame
+      det_covs = Year_frame
 )
 
 p3 <- auto_occ(
-      ~ Season
+      ~ Year
       ~1,
       y= deer_y,
-      det_covs = season_frame
+      det_covs = Year_frame
 )
 
-# Comparing models
-detection.aic <- compare_models(
-  list(null = pnull,
-       Forest = p1,
-       Fire = p2,
-       Season = p3),
-  digits = 2
-)
-
-detection.aic
-
-#### First round best model is Forest
-### Add season and fire with additiive and interactive effects to forest
 
 p4 <- auto_occ(
       ~ Forest + Fire
       ~1,
       y= deer_y,
-      det_covs = season_frame
+      det_covs = Year_frame
 )
 
 p5 <- auto_occ(
       ~ Forest * Fire
       ~1,
       y= deer_y,
-      det_covs = season_frame
+      det_covs = Year_frame
 )
 
 p6 <- auto_occ(
-      ~ Forest + Season
+      ~ Forest + Year
       ~1,
       y= deer_y,
-      det_covs = season_frame
+      det_covs = Year_frame
 )
 
 p7 <- auto_occ(
-      ~ Forest * Season
+      ~ Forest * Year
       ~1,
       y= deer_y,
-      det_covs = season_frame
+      det_covs = Year_frame
 )
+
+p8 <- auto_occ(
+      ~ Fire + Year
+      ~1,
+      y= deer_y,
+      det_covs = Year_frame
+)
+
+
+p9 <- auto_occ(
+      ~ Fire * Year
+      ~1,
+      y= deer_y,
+      det_covs = Year_frame
+)
+
+
+
+
 
 detection.aic <- compare_models(
   list(null = pnull,
        Forest = p1,
        Fire = p2,
-       Season = p3,
+       Year = p3,
        `Forest+Fire` = p4,
        `Forest*Fire` = p5,
-       `Forest+Season` = p6,
-       `Forest*Season` =p7),
+       `Forest+Year` = p6,
+       `Forest*Year` =p7,
+       `Fire+Year` = p8,
+       `Fire*Year` = p9),
   digits = 2
 )
 
 dfd.table <- detection.aic
-#write.csv(dfd.table,"Deer_Fire_Detection.csv")
-### Best model is model 7 Forest * Season acounting for 97% of the weight
+dfd.table
+write.csv(dfd.table,"Deer_Fire_Detection.csv")
+### Best model is model 7 Forest * Year acounting for 97% of the weight
 
 ```
 
@@ -236,11 +274,11 @@ How does occupancy change in response to fire across forest types?
 ```{r}
 
 q1 <- auto_occ(
-  ~Forest * Season
+  ~Forest * Year
   ~ Forest * Fire,
   y = deer_y,
-  det_covs = season_frame,
-  occ_covs = season_frame
+  det_covs = Year_frame,
+  occ_covs = Year_frame
 )
 
 
@@ -262,31 +300,70 @@ q1.predict <- predict(q1, type = "psi", newdata = nd, se.fit= TRUE)
 q1.predict <- cbind(nd, q1.predict)
 q1.predict
 
+q1_b <- summary(q1)
+
+dq1_b <- q1_b@rho
+oq1_b <- q1_b@psi
+
+write.csv(dq1_b, "Det_Deer_Q1_Betas.csv")
+write.csv(oq1_b, "Occ_Deer_Q1_Betas.csv")
+
+predict(q1, type = "psi", level=0.6)
+predict(q1, type = "psi")
 
 # Create the plot using the defined jitter position
-ggplot(data = q1.predict, aes(x = Forest, y = estimate, colour = Fire)) +
+ggplot(data = q1.predict, aes(x = factor(Forest, level = c("A", "M", "J")), y = estimate, 
+                              colour = factor(Fire, level =c("0", "1")))) +
   geom_point(size = 2, position = position_dodge(0.5)) +
   geom_errorbar(aes(ymin = lower, ymax = upper), width = 0.2, position = position_dodge(0.5)) +
   ylab("Deer Occupancy")+
   theme_classic()+
   theme(text = element_text(family = "serif", size = 12))+
-  scale_x_discrete(label = c("Aspen Conifer", 
-                             "Pinyon Juniper",
-                             "Oak Maple"))+
-  scale_color_discrete(labels = c("Burned", "Unburned"))+
+  scale_x_discrete(label = c("Aspen\nConifer","Oak\nMaple" ,
+                             "Pinyon\nJuniper"
+                             ))+
+  scale_color_manual(values = c("0" = "blue", "1" = "red"),labels = c("Unburned", "Burned"))+
   theme(
-    text = element_text(family = "serif", size = 12),
-    axis.title = element_text(size = 12),
-    axis.text = element_text(size = 12),
-    legend.text = element_text(size = 12),
-    legend.title = element_text(size = 12),
-    plot.title = element_text(size = 12),
-    plot.subtitle = element_text(size = 12),
-    plot.caption = element_text(size = 12)
+    text = element_text(family = "serif", size = 12, color = "black"),
+    axis.title = element_text(size = 12, color = "black"),
+    axis.text = element_text(size = 12, color = "black"),
+    legend.text = element_text(size = 12, color = "black"),
+    legend.title = element_text(size = 12, color = "black"),
+    plot.title = element_text(size = 12, color = "black"),
+    plot.subtitle = element_text(size = 12, color = "black"),
+    plot.caption = element_text(size = 12, color = "black")
   )+
-  ylim(0,1)
+  ylim(0,1)+
+  xlab(element_blank())+
+  labs(color = "Burn status")
 
+#rerun without legend
 
+ggplot(data = q1.predict, aes(x = factor(Forest, level = c("A", "M", "J")), y = estimate, 
+                              colour = factor(Fire, level =c("0", "1")))) +
+  geom_point(size = 2, position = position_dodge(0.5)) +
+  geom_errorbar(aes(ymin = lower, ymax = upper), width = 0.2, position = position_dodge(0.5)) +
+  ylab("Deer Occupancy")+
+  theme_classic()+
+  theme(text = element_text(family = "serif", size = 12))+
+  scale_x_discrete(label = c("Aspen\nConifer","Oak\nMaple" ,
+                             "Pinyon\nJuniper"
+                             ))+
+  scale_color_manual(values = c("0" = "blue", "1" = "red"),labels = c("Unburned", "Burned"))+
+  theme(
+    text = element_text(family = "serif", size = 12, color = "black"),
+    axis.title = element_text(size = 12, color = "black"),
+    axis.text = element_text(size = 12, color = "black"),
+    legend.text = element_text(size = 12, color = "black"),
+    legend.title = element_text(size = 12, color = "black"),
+    plot.title = element_text(size = 12, color = "black"),
+    plot.subtitle = element_text(size = 12, color = "black"),
+    plot.caption = element_text(size = 12, color = "black")
+  )+
+  ylim(0,1)+
+  xlab(element_blank())+
+  labs(color = "Burn status")+
+  theme(legend.position="none")
 
 ```
 
@@ -315,14 +392,17 @@ Best detection for Fire Severity
 
 
 # make named list (don't worry about the warning)
-season_frame <- list(
-   Season = matrix(
-     dh$season,
+Year_frame <- list(
+   Year = matrix(
+     dh$Year,
      ncol = dim(deer_y)[2],
      nrow = dim(deer_y)[1]
    ),
    Forest = deer_covariates$Forest,
-   FireSev = deer_covariates$FireSev
+   FireSev = deer_covariates$FireSev,
+   Season = matrix(seasons,
+                   ncol = dim(deer_y)[2],
+     nrow = dim(deer_y)[1])
  )
 
 # modeling with no covariates
@@ -333,69 +413,69 @@ pnull <- auto_occ(
 )
 
 
-#### Iterative models
-#### Original 3
+
 p1 <- auto_occ(
       ~ Forest
       ~1,
       y= deer_y,
-      det_covs = season_frame
+      det_covs = Year_frame
 )
 
 p2 <- auto_occ(
       ~ FireSev
       ~1,
       y= deer_y,
-      det_covs = season_frame
+      det_covs = Year_frame
 )
 
 p3 <- auto_occ(
-      ~ Season
+      ~ Year
       ~1,
       y= deer_y,
-      det_covs = season_frame
+      det_covs = Year_frame
 )
 
-# Comparing models
-detection.aic <- compare_models(
-  list(null = pnull,
-       Forest = p1,
-       FireSev = p2,
-       Season = p3),
-  digits = 2
-)
-
-detection.aic
-
-#### First round best model is Forest
-### Add season and fire with additiive and interactive effects to forest
 
 p4 <- auto_occ(
       ~ Forest + FireSev
       ~1,
       y= deer_y,
-      det_covs = season_frame
+      det_covs = Year_frame
 )
 
 p5 <- auto_occ(
       ~ Forest * FireSev
       ~1,
       y= deer_y,
-      det_covs = season_frame
+      det_covs = Year_frame
 )
 
 p6 <- auto_occ(
-      ~ Forest + Season
+      ~ Forest + Year
       ~1,
       y= deer_y,
-      det_covs = season_frame
+      det_covs = Year_frame
 )
 
 p7 <- auto_occ(
-      ~ Forest * Season
+      ~ Forest * Year
       ~1,
       y= deer_y,
-      det_covs = season_frame
+      det_covs = Year_frame
+)
+
+p8 <- auto_occ(
+      ~ FireSev + Year
+      ~1,
+      y= deer_y,
+      det_covs = Year_frame
+)
+
+p9 <- auto_occ(
+      ~ FireSev * Year
+      ~1,
+      y= deer_y,
+      det_covs = Year_frame
 )
 
 # Comparing models
@@ -403,17 +483,23 @@ detection.aic <- compare_models(
   list(null = pnull,
        Forest = p1,
        FireSev = p2,
-       Season = p3,
+       Year = p3,
        `Forest+FireSev` = p4,
        `Forest*FireSev` = p5,
-       `Forest+Season` = p6,
-       `Forest*Season` =p7),
+       `Forest+Year` = p6,
+       `Forest*Year` =p7,
+       `FireSev+Year` = p8,
+       `FireSev*Year` = p9),
   digits = 2
 )
 
 dfsd <- detection.aic
+dfsd
+
+
+
 #write.csv(dfsd, "Deer_FireSev_Detection.csv")
-### Best model is model 7 Forest * Season acounting for 97% of the weight
+### Best model is model 7 Forest * Year acounting for 97% of the weight
 
 ```
 
@@ -423,14 +509,22 @@ Occupancy response to fire severity across fire types
 
 
 q2 <- auto_occ(
-  ~Forest * Season
+  ~Forest * Year
   ~ Forest * FireSev,
   y = deer_y,
-  det_covs = season_frame,
-  occ_covs = season_frame
+  det_covs = Year_frame,
+  occ_covs = Year_frame
 )
 
 summary(q2)
+
+q2_b <- summary(q2)
+
+dq2_b <- q2_b@rho
+oq2_b <- q2_b@psi
+
+write.csv(dq2_b, "Det_Deer_Q2_Betas.csv")
+write.csv(oq2_b, "Occ_Deer_Q2_Betas.csv")
 
 # nd1 <- data.frame(Forest= "A", Fire=as.factor(1), years=c(2:5), effort=14)
 # nd2 <- data.frame(Forest= "A", Fire=as.factor(0), years=c(2:5), effort=14)
@@ -458,28 +552,52 @@ q2.predict
 
 
 
-# Create the plot using the defined jitter position
-ggplot(data = q2.predict, aes(x = FireSev, y = estimate, colour = Forest)) +
-  geom_point(size = 2, position = position_dodge(0.5)) +
-  geom_line(position = position_dodge(0.5))+
-  geom_errorbar(aes(ymin = lower, ymax = upper), width = 0.2, position = position_dodge(0.5)) +
+
+
+ggplot(data = q2.predict, aes(y= estimate, x= FireSev, colour = Forest))+
+  geom_smooth()+
+  geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.1, linetype = "dashed", fill = "white")+
   theme_classic()+
   ylab("Deer Occupancy")+
-  theme(text = element_text(family = "serif", size = 12))+
-  scale_color_discrete(label = c("Aspen Conifer", 
-                             "Pinyon Juniper",
-                             "Oak Maple"))+
-  theme(
-    text = element_text(family = "serif", size = 12),
-    axis.title = element_text(size = 12),
-    axis.text = element_text(size = 12),
-    legend.text = element_text(size = 12),
-    legend.title = element_text(size = 12),
-    plot.title = element_text(size = 12),
-    plot.subtitle = element_text(size = 12),
-    plot.caption = element_text(size = 12)
-  )+
-  ylim(0,1)
+  xlab("Fire Severity")+
+  labs(color = "Forest Type")+
+  scale_color_manual(values = c("A" = "#FFCC33", "M"= "red", "J"= "darkgreen"),label = c("Aspen Conifer", 
+                            "Pinyon Juniper",
+                            "Oak Maple"))+
+  theme(plot.title    = element_text(size=12, family = "serif", colour = "black"),
+        plot.subtitle = element_text(size=12, family = "serif"),
+        axis.title.x  = element_text(size=12, family = "serif", colour = "black"),
+        axis.title.y  = element_text(size=12, family = "serif", colour = "black"),
+        axis.text.x   = element_text(size=12, family = "serif", colour = "black"),
+        axis.text.y   = element_text(size=12, family = "serif", colour = "black"),
+        legend.text   = element_text(size=12, family = "serif", colour = "black"),
+        legend.title  = element_text(size=12, family = "serif", colour = "black"),
+        panel.border  = element_blank())+
+  scale_y_continuous(limits = c(0, 1))
+
+# Rpeat no legend
+
+ggplot(data = q2.predict, aes(y= estimate, x= FireSev, colour = Forest))+
+  geom_smooth()+
+  geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.1, linetype = "dashed", fill = "white")+
+  theme_classic()+
+  ylab("Deer Occupancy")+
+  xlab("Fire Severity")+
+  labs(color = "Forest Type")+
+  scale_color_manual(values = c("A" = "#FFCC33", "M"= "red", "J"= "darkgreen"),label = c("Aspen Conifer", 
+                            "Pinyon Juniper",
+                            "Oak Maple"))+
+  theme(plot.title    = element_text(size=12, family = "serif", colour = "black"),
+        plot.subtitle = element_text(size=12, family = "serif"),
+        axis.title.x  = element_text(size=12, family = "serif", colour = "black"),
+        axis.title.y  = element_text(size=12, family = "serif", colour = "black"),
+        axis.text.x   = element_text(size=12, family = "serif", colour = "black"),
+        axis.text.y   = element_text(size=12, family = "serif", colour = "black"),
+        legend.text   = element_text(size=12, family = "serif", colour = "black"),
+        legend.title  = element_text(size=12, family = "serif", colour = "black"),
+        panel.border  = element_blank())+
+  scale_y_continuous(limits = c(0, 1))+ 
+  theme(legend.position = "none")
 
 ```
 
@@ -495,14 +613,17 @@ Fitting models
 
 
 # make named list (don't worry about the warning)
-season_frame <- list(
-   Season = matrix(
-     dh$season,
+Year_frame <- list(
+   Year = matrix(
+     dh$Year,
      ncol = dim(deer_y)[2],
      nrow = dim(deer_y)[1]
    ),
    Forest = deer_covariates$Forest,
-   Fire = deer_covariates$Fire
+   Fire = deer_covariates$Fire,
+   Season = matrix(seasons,
+                   ncol = dim(deer_y)[2],
+     nrow = dim(deer_y)[1])
  )
 
 
@@ -510,83 +631,88 @@ season_frame <- list(
 
 # Find best occupancy model
 psinull <- auto_occ(
-      ~ Forest* Season
+      ~ Forest* Year
       ~1,
       y= deer_y,
-      det_covs = season_frame,
-      occ_covs = season_frame
+      det_covs = Year_frame,
+      occ_covs = Year_frame
 )
 
 psi1 <- auto_occ(
-      ~ Forest* Season
+      ~ Forest* Year
       ~ Forest,
       y= deer_y,
-      det_covs = season_frame,
-      occ_covs = season_frame
+      det_covs = Year_frame,
+      occ_covs = Year_frame
 )
 
 psi2 <- auto_occ(
-      ~ Forest* Season
+      ~ Forest* Year
       ~ Fire,
       y= deer_y,
-      det_covs = season_frame,
-      occ_covs = season_frame
+      det_covs = Year_frame,
+      occ_covs = Year_frame
 )
 
 psi3 <- auto_occ(
-      ~ Forest* Season
-      ~ Season,
+      ~ Forest* Year
+      ~ Year,
       y= deer_y,
-      det_covs = season_frame,
-      occ_covs = season_frame
+      det_covs = Year_frame,
+      occ_covs = Year_frame
 )
 
-# Comparing models
-psi.aic <- compare_models(
-  list(null = psinull,
-       Forest = psi1,
-       FireSev = psi2,
-       Season = psi3),
-  digits = 2
-)
 
-psi.aic
-
-### Iterative selection round 2
 
 
 psi4 <- auto_occ(
-      ~ Forest* Season
+      ~ Forest* Year
       ~ Forest + Fire,
       y= deer_y,
-      det_covs = season_frame,
-      occ_covs = season_frame
+      det_covs = Year_frame,
+      occ_covs = Year_frame
 )
 
 
 
 psi5 <- auto_occ(
-      ~ Forest* Season
+      ~ Forest* Year
       ~ Forest * Fire,
       y= deer_y,
-      det_covs = season_frame,
-      occ_covs = season_frame
+      det_covs = Year_frame,
+      occ_covs = Year_frame
 )
 
 psi6 <- auto_occ(
-      ~ Forest* Season
-      ~ Forest + Season,
+      ~ Forest* Year
+      ~ Forest + Year,
       y= deer_y,
-      det_covs = season_frame,
-      occ_covs = season_frame
+      det_covs = Year_frame,
+      occ_covs = Year_frame
 )
 
 psi7 <- auto_occ(
-      ~ Forest* Season
-      ~ Forest * Season,
+      ~ Forest* Year
+      ~ Forest * Year,
       y= deer_y,
-      det_covs = season_frame,
-      occ_covs = season_frame
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+psi8 <- auto_occ(
+      ~ Forest* Year
+      ~ Fire + Year,
+      y= deer_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+psi9 <- auto_occ(
+      ~ Forest* Year
+      ~ Fire * Year,
+      y= deer_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
 )
 
 
@@ -596,20 +722,85 @@ psi.aic <- compare_models(
   list(null = psinull,
        Forest = psi1,
        Fire = psi2,
-       Season = psi3,
+       Year = psi3,
        `Forest+Fire` = psi4,
        `Forest*Fire` = psi5,
-       `Forest+Season` = psi6,
-       `Forest*Season` =psi7),
+       `Forest+Year` = psi6,
+       `Forest*Year` =psi7,
+       `Fire+Year` = psi8,
+       `Fire*Year` = psi9),
   digits = 2
 )
 
+dfb <- summary(psi7)
+dfb
+
+ddfb <- dfb@rho
+odfb <- dfb@psi
+
+typeof(dfb)
+
+write.csv(ddfb, "Det_Deer_Fire_Betas.csv")
+write.csv(odfb, "Occ_Deer_Fire_Betas.csv")
+
 psi.aic
 
+### Plot best model
+summary(psi7)
+bdf <- predict(psi7, type = "psi")
+bdf
+
+ggplot(data = bdf, aes(x= Year, y= estimate, colour = Forest))+
+  geom_smooth()+
+  geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.1, linetype = "dashed", fill = "white")+
+  ylab("Deer Occupancy")+
+  theme_classic()+
+  scale_color_manual(values = c("A" = "#FFCC33", "M"= "red", "J"= "darkgreen"),label = c("Aspen Conifer", 
+                            "Pinyon Juniper",
+                            "Oak Maple"))+
+  theme(
+    text = element_text(family = "serif", size = 12, color = "black"),
+    axis.title = element_text(size = 12, color = "black"),
+    axis.text = element_text(size = 12, color = "black"),
+    legend.text = element_text(size = 12, color = "black"),
+    legend.title = element_text(size = 12, color = "black"),
+    plot.title = element_text(size = 12, color = "black"),
+    plot.subtitle = element_text(size = 12, color = "black"),
+    plot.caption = element_text(size = 12, color = "black")
+  )
+
+# Rerun without legend
+
+ggplot(data = bdf, aes(x= Year, y= estimate, colour = Forest))+
+  geom_smooth()+
+  geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.1, linetype = "dashed", fill = "white")+
+  ylab("Deer Occupancy")+
+  theme_classic()+
+  scale_color_manual(values = c("A" = "#FFCC33", "M"= "red", "J"= "darkgreen"),label = c("Aspen Conifer", 
+                            "Pinyon Juniper",
+                            "Oak Maple"))+
+  theme(
+    text = element_text(family = "serif", size = 12, color = "black"),
+    axis.title = element_text(size = 12, color = "black"),
+    axis.text = element_text(size = 12, color = "black"),
+    legend.text = element_text(size = 12, color = "black"),
+    legend.title = element_text(size = 12, color = "black"),
+    plot.title = element_text(size = 12, color = "black"),
+    plot.subtitle = element_text(size = 12, color = "black"),
+    plot.caption = element_text(size = 12, color = "black")
+  )+
+  theme(legend.position="none")
+  
+
+
+
+ dbo <- psi.aic
+#write.csv(dbo, "Deer_Burned_Occupancy.csv")
+
 variables <- list(
-  Forest = c("Forest*Season", "Forest", "Forest+Fire", "Forest+Season", "Forest*Fire"),
-  Season = c("Forest*Season", "Forest+Season", "Season"),
-  Fire = c("Forest+Fire", "Fire", "Forest*Fire")
+  Forest = c("Forest*Year", "Forest", "Forest+Fire", "Forest+Year", "Forest*Fire"),
+  Year = c("Forest*Year", "Forest+Year", "Year", "Fire+Year", "Fire*Year"),
+  Fire = c("Forest+Fire", "Fire", "Forest*Fire", "Fire+Year", "Fire*Year")
 )
 
 #### Lots of top competing models
@@ -623,28 +814,34 @@ importance<- sapply(variables, function(models){
 importance <- as.data.frame(importance)
 importance$variable <- row.names(importance)
 
+deer_importance <- importance
 
-ggplot(importance, aes(x = importance, y = variable)) +
-  geom_point(size = 3, color = "blue") +
-  geom_text(aes(label = importance), hjust = -0.2, size = 4) +
-  labs(x = "Relative Importance (w+)", y = "Variable", 
-       title = "Relative Variable Importance") +
+ggplot(importance, aes(y = importance, x = variable)) +
+  geom_col(size = 3, fill = "blue") +
+  geom_text(aes(label = importance), vjust = -0.2, size = 4) +
+  labs(y = "Relative Importance (w+)", x = "Variable", 
+       title = "Deer Fire") +
+  scale_x_discrete(label =c("Fire", "Forest", "Year"))+
   theme_classic() +
-  xlim(0, 1)+
+  ylim(0, 1)+
   theme(
-    text = element_text(family = "serif", size = 12),
-    axis.title = element_text(size = 12),
-    axis.text = element_text(size = 12),
-    legend.text = element_text(size = 12),
-    legend.title = element_text(size = 12),
-    plot.title = element_text(size = 12),
-    plot.subtitle = element_text(size = 12),
-    plot.caption = element_text(size = 12)
-  )
+     text = element_text(family = "serif", size = 12, color = "black"),
+    axis.title = element_text(size = 12, color = "black"),
+    axis.text = element_text(size = 12, color = "black"),
+    legend.text = element_text(size = 12, color = "black"),
+    legend.title = element_text(size = 12, color = "black"),
+    plot.title = element_text(size = 12, color = "black"),
+    plot.subtitle = element_text(size = 12, color = "black"),
+    plot.caption = element_text(size = 12, color = "black")
+  )+
+    scale_y_continuous(expand = c(0, 0), limits = c(0,1))
 
-
+summary(psinull)
 
 ```
+
+
+
 
 Model Averaging
 
@@ -654,7 +851,7 @@ Model Averaging
 # and set up a binary matrix to denote if they were present or not in that model.
 
 # create model list again
-model_list <- list(a=psinull,b=psi1,c=psi2,d=psi3,e=psi4,f=psi5,g=psi6,h=psi7)
+model_list <- list(a=psinull,b=psi1,c=psi2,d=psi3,e=psi4,f=psi5,g=psi6,h=psi7, i=psi8, j=psi9)
 
 # and AIC results
 aic_results <- compare_models(
@@ -662,6 +859,7 @@ aic_results <- compare_models(
 )
 
 aic_results
+
 
 # reorder the model_list based on relative fit
 model_list <- model_list[aic_results$model]
@@ -817,28 +1015,30 @@ avg_parm %>%
       where(is.numeric), ~ round(., digits = 2))
     )
   
-avg_parm
 
 data_filtered <- avg_parm %>%
   filter(!grepl("^rho", parameter))
 
+data_filtered
+
+
 ggplot(data= data_filtered, aes(x = est, y = parameter)) +
   geom_point() +
   geom_errorbarh(aes(xmin = lower, xmax = upper), height = 0.2) +
-  labs(title = "Model averaging for Occupancy",
+  labs(title = "Deer Fire",
        x = "Estimate",
        y = "Parameter") +
-  theme_classic()+
+  theme_minimal()+
   theme(
     text = element_text(family = "serif", size = 12),
-    axis.title = element_text(size = 12),
-    axis.text = element_text(size = 12),
-    legend.text = element_text(size = 12),
-    legend.title = element_text(size = 12),
-    plot.title = element_text(size = 12),
-    plot.subtitle = element_text(size = 12),
-    plot.caption = element_text(size = 12)
-  )
+    axis.title = element_text(size = 12, color = "black"),
+    axis.text = element_text(size = 12, color = "black"),
+    legend.text = element_text(size = 12, color = "black"),
+    legend.title = element_text(size = 12, color = "black"),
+    plot.title = element_text(size = 12, color = "black"),
+    plot.subtitle = element_text(size = 12, color = "black"),
+    plot.caption = element_text(size = 12, color = "black")
+  )+xlim(-7.5,7.5)
 
 
 ```
@@ -850,11 +1050,11 @@ Predict occupancy
 
 #### Plot best model
 
-nd1 <- data.frame(Forest= "A", Season = c(1:4))
+nd1 <- data.frame(Forest= "A", Year = c(1:4))
 
-nd3 <- data.frame(Forest= "J", Season = c(1:4))
+nd3 <- data.frame(Forest= "J", Year = c(1:4))
 
-nd5 <- data.frame(Forest= "M", Season = c(1:4))
+nd5 <- data.frame(Forest= "M", Year = c(1:4))
 
 
 nd <- rbind(nd1,nd3,nd5)
@@ -865,7 +1065,7 @@ pred.top <- cbind(nd, pred.top)
 
 head(pred.top)
 
-ggplot(data = pred.top, aes(y= estimate, x=Season, colour = Forest))+
+ggplot(data = pred.top, aes(y= estimate, x=Year, colour = Forest))+
   geom_point(size = 2, position = position_dodge(0.2))+
   geom_line(position = position_dodge(0.2))+
   geom_errorbar(aes(ymin= lower, ymax = upper, width = 0.2), position = position_dodge(0.2))+
@@ -876,16 +1076,41 @@ ggplot(data = pred.top, aes(y= estimate, x=Season, colour = Forest))+
                              "Pinyon Juniper",
                              "Oak Maple"))+
   theme(
-    text = element_text(family = "serif", size = 12),
-    axis.title = element_text(size = 12),
-    axis.text = element_text(size = 12),
-    legend.text = element_text(size = 12),
-    legend.title = element_text(size = 12),
-    plot.title = element_text(size = 12),
-    plot.subtitle = element_text(size = 12),
-    plot.caption = element_text(size = 12)
+  text = element_text(family = "serif", size = 12, color = "black"),
+    axis.title = element_text(size = 12, color = "black"),
+    axis.text = element_text(size = 12, color = "black"),
+    legend.text = element_text(size = 12, color = "black"),
+    legend.title = element_text(size = 12, color = "black"),
+    plot.title = element_text(size = 12, color = "black"),
+    plot.subtitle = element_text(size = 12, color = "black"),
+    plot.caption = element_text(size = 12, color = "black")
   )+
   ylim(0,1)
+
+#rerun without legend
+
+ggplot(data = pred.top, aes(y= estimate, x=Year, colour = Forest))+
+  geom_point(size = 2, position = position_dodge(0.2))+
+  geom_line(position = position_dodge(0.2))+
+  geom_errorbar(aes(ymin= lower, ymax = upper, width = 0.2), position = position_dodge(0.2))+
+  theme_classic()+
+  ylab("Deer Occupancy")+
+  theme(text = element_text(family = "serif", size = 12))+
+  scale_color_discrete(label = c("Aspen Conifer", 
+                             "Pinyon Juniper",
+                             "Oak Maple"))+
+  theme(
+  text = element_text(family = "serif", size = 12, color = "black"),
+    axis.title = element_text(size = 12, color = "black"),
+    axis.text = element_text(size = 12, color = "black"),
+    legend.text = element_text(size = 12, color = "black"),
+    legend.title = element_text(size = 12, color = "black"),
+    plot.title = element_text(size = 12, color = "black"),
+    plot.subtitle = element_text(size = 12, color = "black"),
+    plot.caption = element_text(size = 12, color = "black")
+  )+
+  ylim(0,1)+
+  theme(legend.position="none")
 
 ```
 
@@ -895,12 +1120,10 @@ Fitting models
 
 ```{r}
 
-
-
 # make named list (don't worry about the warning)
-season_frame <- list(
-   Season = matrix(
-     dh$season,
+Year_frame <- list(
+   Year = matrix(
+     dh$Year,
      ncol = dim(deer_y)[2],
      nrow = dim(deer_y)[1]
    ),
@@ -913,106 +1136,195 @@ season_frame <- list(
 
 # Find best occupancy model
 psinull <- auto_occ(
-      ~ Forest* Season
+      ~ Forest* Year
       ~1,
       y= deer_y,
-      det_covs = season_frame,
-      occ_covs = season_frame
+      det_covs = Year_frame,
+      occ_covs = Year_frame
 )
 
 psi1 <- auto_occ(
-      ~ Forest* Season
+      ~ Forest* Year
       ~ Forest,
       y= deer_y,
-      det_covs = season_frame,
-      occ_covs = season_frame
+      det_covs = Year_frame,
+      occ_covs = Year_frame
 )
 
 psi2 <- auto_occ(
-      ~ Forest* Season
+      ~ Forest* Year
       ~ FireSev,
       y= deer_y,
-      det_covs = season_frame,
-      occ_covs = season_frame
+      det_covs = Year_frame,
+      occ_covs = Year_frame
 )
 
 psi3 <- auto_occ(
-      ~ Forest* Season
-      ~ Season,
+      ~ Forest* Year
+      ~ Year,
       y= deer_y,
-      det_covs = season_frame,
-      occ_covs = season_frame
+      det_covs = Year_frame,
+      occ_covs = Year_frame
 )
 
-# Comparing models
-psi.aic <- compare_models(
-  list(null = psinull,
-       Forest = psi1,
-       FireSev = psi2,
-       Season = psi3),
-  digits = 2
-)
-
-psi.aic
-
-### Iterative selection round 2
 
 
 psi4 <- auto_occ(
-      ~ Forest* Season
+      ~ Forest* Year
       ~ Forest + FireSev,
       y= deer_y,
-      det_covs = season_frame,
-      occ_covs = season_frame
+      det_covs = Year_frame,
+      occ_covs = Year_frame
 )
 
 
 
 psi5 <- auto_occ(
-      ~ Forest* Season
+      ~ Forest* Year
       ~ Forest * FireSev,
       y= deer_y,
-      det_covs = season_frame,
-      occ_covs = season_frame
+      det_covs = Year_frame,
+      occ_covs = Year_frame
 )
 
 psi6 <- auto_occ(
-      ~ Forest* Season
-      ~ Forest + Season,
+      ~ Forest* Year
+      ~ Forest + Year,
       y= deer_y,
-      det_covs = season_frame,
-      occ_covs = season_frame
+      det_covs = Year_frame,
+      occ_covs = Year_frame
 )
 
 psi7 <- auto_occ(
-      ~ Forest* Season
-      ~ Forest * Season,
+      ~ Forest* Year
+      ~ Forest * Year,
       y= deer_y,
-      det_covs = season_frame,
-      occ_covs = season_frame
+      det_covs = Year_frame,
+      occ_covs = Year_frame
 )
 
+psi8 <- auto_occ(
+      ~ Forest* Year
+      ~ FireSev + Year,
+      y= deer_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
 
+psi9 <- auto_occ(
+      ~ Forest* Year
+      ~ FireSev * Year,
+      y= deer_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
 
 # Comparing models
 psi.aic <- compare_models(
   list(null = psinull,
        Forest = psi1,
        Fire = psi2,
-       Season = psi3,
+       Year = psi3,
        `Forest+FireSev` = psi4,
        `Forest*FireSev` = psi5,
-       `Forest+Season` = psi6,
-       `Forest*Season` =psi7),
+       `Forest+Year` = psi6,
+       `Forest*Year` =psi7,
+       `FireSev+Year` = psi8,
+       `FireSev*Year` = psi9),
   digits = 2
 )
 
 psi.aic
 
+
+
+dfsb <-summary(psi7)
+
+ddfsb <- dfsb@rho
+odfsb <- dfsb@psi
+
+write.csv(ddfsb, "Det_Deer_FireSev_Betas.csv")
+write.csv(odfsb, "Occ_Deer_FireSev_Betas.csv")
+
+### Plot best model
+bdfs <- predict(psi7, type = "psi")
+bdfs
+
+#### Iteration 1####
+ggplot(data = bdfs, aes(x= Year, y= estimate, colour = Forest))+
+  geom_smooth()+
+  geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.1, linetype = "dashed", fill = "white")+
+  theme_classic()+
+  ylab("Deer Occupancy")+
+  labs(color = "Forest Type")+
+  scale_color_manual(values = c("A" = "#FFCC33", "M"= "red", "J"= "darkgreen"),label = c("Aspen Conifer", 
+                            "Pinyon Juniper",
+                            "Oak Maple"))+
+  theme(plot.title    = element_text(size=12, family = "serif", colour = "black"),
+        plot.subtitle = element_text(size=12, family = "serif"),
+        axis.title.x  = element_text(size=12, family = "serif", colour = "black"),
+        axis.title.y  = element_text(size=12, family = "serif", colour = "black"),
+        axis.text.x   = element_text(size=12, family = "serif", colour = "black"),
+        axis.text.y   = element_text(size=12, family = "serif", colour = "black"),
+        legend.text   = element_text(size=12, family = "serif", colour = "black"),
+        legend.title  = element_text(size=12, family = "serif", colour = "black"),
+        panel.border  = element_blank())+
+  scale_y_continuous(limits = c(0, 1))
+
+
+#####ITeration 2 #####
+
+ggplot(data = bdfs[bdfs$Forest!= "J",], aes(x= Year, y= estimate, colour = Forest))+
+  geom_smooth()+
+  geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.1, linetype = "dashed", fill = "white")+
+  theme_classic()+
+  ylab("Deer Occupancy")+
+  labs(color = "Forest Type")+
+  scale_color_manual(values = c("A" = "#FFCC33", "M"= "red"),label = c("Aspen Conifer", 
+                            "Oak Maple",
+                            "Pinyon Juniper"))+
+  theme(plot.title    = element_text(size=12, family = "serif", colour = "black"),
+        plot.subtitle = element_text(size=12, family = "serif"),
+        axis.title.x  = element_text(size=12, family = "serif", colour = "black"),
+        axis.title.y  = element_text(size=12, family = "serif", colour = "black"),
+        axis.text.x   = element_text(size=12, family = "serif", colour = "black"),
+        axis.text.y   = element_text(size=12, family = "serif", colour = "black"),
+        legend.text   = element_text(size=12, family = "serif", colour = "black"),
+        legend.title  = element_text(size=12, family = "serif", colour = "black"),
+        panel.border  = element_blank())+
+  scale_y_continuous(limits = c(0, 1))
+
+#### Iteration 3 #####
+
+ggplot(data = bdfs[bdfs$Forest== "A",], aes(x= Year, y= estimate, colour = Forest))+
+  geom_smooth()+
+  geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.1, linetype = "dashed", fill = "white")+
+  theme_classic()+
+  ylab("Deer Occupancy")+
+  labs(color = "Forest Type")+
+  scale_color_manual(values = c("A"= "#FFCC33"),label = c("Aspen Conifer", 
+                             "Pinyon Juniper",
+                             "Oak Maple"))+
+  theme(plot.title    = element_text(size=12, family = "serif", colour = "black"),
+        plot.subtitle = element_text(size=12, family = "serif"),
+        axis.title.x  = element_text(size=12, family = "serif", colour = "black"),
+        axis.title.y  = element_text(size=12, family = "serif", colour = "black"),
+        axis.text.x   = element_text(size=12, family = "serif", colour = "black"),
+        axis.text.y   = element_text(size=12, family = "serif", colour = "black"),
+        legend.text   = element_text(size=12, family = "serif", colour = "black"),
+        legend.title  = element_text(size=12, family = "serif", colour = "black"),
+        panel.border  = element_blank())+
+  scale_y_continuous(limits = c(0, 1))
+
+###############
+
+dfso <- psi.aic
+#write.csv(dfso, "Deer_FireSev_Occupancy.csv")
+
 variables <- list(
-  Forest = c("Forest*Season", "Forest", "Forest+FireSev", "Forest+Season", "Forest*FireSev"),
-  Season = c("Forest*Season", "Forest+Season", "Season"),
-  FireSev = c("Forest+FireSev", "FireSev", "Forest*FireSev")
+  Forest = c("Forest*Year", "Forest", "Forest+Fire", "Forest+Year", "Forest*Fire"),
+  Year = c("Forest*Year", "Forest+Year", "Year", "Fire+Year", "Fire*Year"),
+  `Fire Severity` = c("Forest+Fire", "Fire", "Forest*Fire", "Fire+Year", "Fire*Year")
 )
 
 #### Lots of top competing models
@@ -1027,24 +1339,48 @@ importance <- as.data.frame(importance)
 importance$variable <- row.names(importance)
 
 
-ggplot(importance, aes(x = importance, y = variable)) +
-  geom_point(size = 3, color = "blue") +
-  geom_text(aes(label = importance), hjust = -0.2, size = 4) +
-  labs(x = "Relative Importance (w+)", y = "Variable", 
-       title = "Relative Variable Importance") +
+ggplot(importance, aes(y = importance, x = variable)) +
+  geom_col(size = 3, fill = "blue") +
+  geom_text(aes(label = importance), vjust = -0.2, size = 4) +
+  labs(y = "Relative Importance (w+)", x = "Variable", 
+       title = "Deer Fire Severity") +
+  scale_x_discrete(label =c("Fire\nSeverity", "Forest", "Year"))+
   theme_classic() +
-  xlim(0, 1)+
+  ylim(0, 1)+
   theme(
-    text = element_text(family = "serif", size = 12),
-    axis.title = element_text(size = 12),
-    axis.text = element_text(size = 12),
-    legend.text = element_text(size = 12),
-    legend.title = element_text(size = 12),
-    plot.title = element_text(size = 12),
-    plot.subtitle = element_text(size = 12),
-    plot.caption = element_text(size = 12)
-  )
+     text = element_text(family = "serif", size = 12, color = "black"),
+    axis.title = element_text(size = 12, color = "black"),
+    axis.text = element_text(size = 12, color = "black"),
+    legend.text = element_text(size = 12, color = "black"),
+    legend.title = element_text(size = 12, color = "black"),
+    plot.title = element_text(size = 12, color = "black"),
+    plot.subtitle = element_text(size = 12, color = "black"),
+    plot.caption = element_text(size = 12, color = "black")
+  )+
+    scale_y_continuous(expand = c(0, 0), limits = c(0,1))
 
+## Final best prediction without legend
+
+ggplot(data = bdfs, aes(x= Year, y= estimate, colour = Forest))+
+  geom_smooth()+
+  geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.1, linetype = "dashed", fill = "white")+
+  theme_classic()+
+  ylab("Deer Occupancy")+
+  labs(color = "Forest Type")+
+  scale_color_manual(values = c("A" = "#FFCC33", "M"= "red", "J"= "darkgreen"),label = c("Aspen Conifer", 
+                            "Pinyon Juniper",
+                            "Oak Maple"))+
+  theme(plot.title    = element_text(size=12, family = "serif", colour = "black"),
+        plot.subtitle = element_text(size=12, family = "serif"),
+        axis.title.x  = element_text(size=12, family = "serif", colour = "black"),
+        axis.title.y  = element_text(size=12, family = "serif", colour = "black"),
+        axis.text.x   = element_text(size=12, family = "serif", colour = "black"),
+        axis.text.y   = element_text(size=12, family = "serif", colour = "black"),
+        legend.text   = element_text(size=12, family = "serif", colour = "black"),
+        legend.title  = element_text(size=12, family = "serif", colour = "black"),
+        panel.border  = element_blank())+
+  scale_y_continuous(limits = c(0, 1))+
+  theme(legend.position = "none")
 
 ```
 
@@ -1056,7 +1392,7 @@ Model Averaging
 # and set up a binary matrix to denote if they were present or not in that model.
 
 # create model list again
-model_list <- list(a=psinull,b=psi1,c=psi2,d=psi3,e=psi4,f=psi5,g=psi6,h=psi7)
+model_list <- list(a=psinull,b=psi1,c=psi2,d=psi3,e=psi4,f=psi5,g=psi6,h=psi7, i=psi8, j=psi9)
 
 # and AIC results
 aic_results <- compare_models(
@@ -1064,6 +1400,8 @@ aic_results <- compare_models(
 )
 
 aic_results
+
+
 
 # reorder the model_list based on relative fit
 model_list <- model_list[aic_results$model]
@@ -1224,23 +1562,25 @@ avg_parm
 data_filtered <- avg_parm %>%
   filter(!grepl("^rho", parameter))
 
+data_filtered
+
 ggplot(data= data_filtered, aes(x = est, y = parameter)) +
   geom_point() +
   geom_errorbarh(aes(xmin = lower, xmax = upper), height = 0.2) +
-  labs(title = "Model averaging for Occupancy",
+  labs(title = "Deer Fire Severity",
        x = "Estimate",
        y = "Parameter") +
-  theme_classic()+
+  theme_minimal()+
   theme(
-    text = element_text(family = "serif", size = 12),
-    axis.title = element_text(size = 12),
-    axis.text = element_text(size = 12),
-    legend.text = element_text(size = 12),
-    legend.title = element_text(size = 12),
-    plot.title = element_text(size = 12),
-    plot.subtitle = element_text(size = 12),
-    plot.caption = element_text(size = 12)
-  )
+     text = element_text(family = "serif", size = 12, color = "black"),
+    axis.title = element_text(size = 12, color = "black"),
+    axis.text = element_text(size = 12, color = "black"),
+    legend.text = element_text(size = 12, color = "black"),
+    legend.title = element_text(size = 12, color = "black"),
+    plot.title = element_text(size = 12, color = "black"),
+    plot.subtitle = element_text(size = 12, color = "black"),
+    plot.caption = element_text(size = 12, color = "black")
+  )+xlim(-7.5,7.5)
 
 ```
 
@@ -1253,11 +1593,11 @@ Predict occupancy
 
 #### Plot best model
 
-nd1 <- data.frame(Forest= "A", Season = c(1:4))
+nd1 <- data.frame(Forest= "A", Year = c(1:4))
 
-nd3 <- data.frame(Forest= "J", Season = c(1:4))
+nd3 <- data.frame(Forest= "J", Year = c(1:4))
 
-nd5 <- data.frame(Forest= "M", Season = c(1:4))
+nd5 <- data.frame(Forest= "M", Year = c(1:4))
 
 
 nd <- rbind(nd1,nd3,nd5)
@@ -1267,7 +1607,7 @@ pred.top <- predict(psi7, type = "psi", newdata = nd)
 pred.top <- cbind(nd, pred.top)
 
 
-ggplot(data = pred.top, aes(y= estimate, x=Season, colour = Forest))+
+ggplot(data = pred.top, aes(y= estimate, x=Year, colour = Forest))+
   geom_point(size = 2, position = position_dodge(0.2))+
   geom_line(position = position_dodge(0.2))+
   geom_errorbar(aes(ymin = lower, ymax = upper), width = 0.2, position = position_dodge(0.2))+
@@ -1278,28 +1618,52 @@ ggplot(data = pred.top, aes(y= estimate, x=Season, colour = Forest))+
                              "Pinyon Juniper",
                              "Oak Maple"))+
   theme(
-    text = element_text(family = "serif", size = 12),
-    axis.title = element_text(size = 12),
-    axis.text = element_text(size = 12),
-    legend.text = element_text(size = 12),
-    legend.title = element_text(size = 12),
-    plot.title = element_text(size = 12),
-    plot.subtitle = element_text(size = 12),
-    plot.caption = element_text(size = 12)
+ text = element_text(family = "serif", size = 12, color = "black"),
+    axis.title = element_text(size = 12, color = "black"),
+    axis.text = element_text(size = 12, color = "black"),
+    legend.text = element_text(size = 12, color = "black"),
+    legend.title = element_text(size = 12, color = "black"),
+    plot.title = element_text(size = 12, color = "black"),
+    plot.subtitle = element_text(size = 12, color = "black"),
+    plot.caption = element_text(size = 12, color = "black")
   )+
   ylim(0,1)
 
+# Rerun without legend
+
+ggplot(data = pred.top, aes(y= estimate, x=Year, colour = Forest))+
+  geom_point(size = 2, position = position_dodge(0.2))+
+  geom_line(position = position_dodge(0.2))+
+  geom_errorbar(aes(ymin = lower, ymax = upper), width = 0.2, position = position_dodge(0.2))+
+  theme_classic()+
+  ylab("Deer Occupancy")+
+  theme(text = element_text(family = "serif", size = 12))+
+  scale_color_discrete(label = c("Aspen Conifer", 
+                             "Pinyon Juniper",
+                             "Oak Maple"))+
+  theme(
+ text = element_text(family = "serif", size = 12, color = "black"),
+    axis.title = element_text(size = 12, color = "black"),
+    axis.text = element_text(size = 12, color = "black"),
+    legend.text = element_text(size = 12, color = "black"),
+    legend.title = element_text(size = 12, color = "black"),
+    plot.title = element_text(size = 12, color = "black"),
+    plot.subtitle = element_text(size = 12, color = "black"),
+    plot.caption = element_text(size = 12, color = "black")
+  )+
+  ylim(0,1)+
+  theme(legend.position = "none")
 
 ```
 
 Isolate features to compare to the global model
 
-```{r}
+```{r, fig.width=5,fig.height=4}
 
 # make named list (don't worry about the warning)
-season_frame <- list(
-   Season = matrix(
-     dh$season,
+Year_frame <- list(
+   Year = matrix(
+     dh$Year,
      ncol = dim(deer_y)[2],
      nrow = dim(deer_y)[1]
    ),
@@ -1310,30 +1674,30 @@ season_frame <- list(
 ### Start with the interactions
 all.int <- auto_occ(
       ~ Forest* Fire
-      ~ Forest * Season * Fire,
+      ~ Forest * Year * Fire,
       y= deer_y,
-      det_covs = season_frame,
-      occ_covs = season_frame
+      det_covs = Year_frame,
+      occ_covs = Year_frame
 )
 
 all.add <- auto_occ(
       ~ Forest* Fire
-      ~ Forest + Season + Fire,
+      ~ Forest + Year + Fire,
       y= deer_y,
-      det_covs = season_frame,
-      occ_covs = season_frame
+      det_covs = Year_frame,
+      occ_covs = Year_frame
 )
 
 
 predict.int <- predict(all.int, type = "psi")
 predict.add <- predict(all.add, type = "psi")
 
-ggplot(data = predict.int, aes(x = Season, y= estimate, colour = Forest, shape = Fire))+ 
+ggplot(data = predict.int, aes(x = Year, y= estimate, colour = Forest, shape = Fire))+ 
   geom_point(size =3)+ 
   geom_line()+
   theme_classic()
 
-ggplot(data = predict.add, aes(x = Season, y= estimate, colour = Forest, shape = Fire))+ 
+ggplot(data = predict.add, aes(x = Year, y= estimate, colour = Forest, shape = Fire))+ 
   geom_point(size =3)+ 
   geom_line()+
   theme_classic()
@@ -1345,7 +1709,7 @@ dh.sub$Fire <- substr(dh.sub$site,7,7)
 aspen_y <- format_y(
   x = dh.sub[dh.sub$Forest == "A",],
   site_column = "site",
-  time_column = "season",
+  time_column = "Year",
   history_columns = 1:25
 )
 
@@ -1360,13 +1724,13 @@ a1 <- auto_occ(
       y= aspen_y)
 
 aspen_frame <- list(
-   Season = matrix(c(rep(1, 12), rep(2, 12), rep(3, 12), rep(4, 12)), nrow = 12, ncol = 4),
+   Year = matrix(c(rep(1, 12), rep(2, 12), rep(3, 12), rep(4, 12)), nrow = 12, ncol = 4),
    Fire = aspen.covariates$Fire
  )
 
 a7 <- auto_occ(
       ~ Fire
-      ~ Season * Fire,
+      ~ Year * Fire,
       y= aspen_y,
       det_covs = aspen_frame,
       occ_covs = aspen_frame
@@ -1375,7 +1739,7 @@ a7 <- auto_occ(
 aspen <- predict(a7, type = "psi")
 aspen
 
-ggplot(data = aspen, aes(x= Season, y = estimate, shape = Fire))+
+ggplot(data = aspen, aes(x= Year, y = estimate, shape = Fire))+
   geom_point(size = 3)+
   geom_line()+ 
   theme_classic()
@@ -1385,7 +1749,7 @@ ggplot(data = aspen, aes(x= Season, y = estimate, shape = Fire))+
 juniper_y <- format_y(
   x = dh.sub[dh.sub$Forest == "J",],
   site_column = "site",
-  time_column = "season",
+  time_column = "Year",
   history_columns = 1:25
 )
 
@@ -1398,13 +1762,13 @@ j1 <- auto_occ(
       y= juniper_y)
 
 juniper_frame <- list(
-   Season = matrix(c(rep(1, 12), rep(2, 12), rep(3, 12), rep(4, 12)), nrow = 12, ncol = 4),
+   Year = matrix(c(rep(1, 12), rep(2, 12), rep(3, 12), rep(4, 12)), nrow = 12, ncol = 4),
    Fire = juniper.covariates$Fire
  )
 
 j7 <- auto_occ(
       ~ Fire
-      ~ Season * Fire,
+      ~ Year * Fire,
       y= juniper_y,
       det_covs = aspen_frame,
       occ_covs = aspen_frame
@@ -1413,7 +1777,7 @@ j7 <- auto_occ(
 juniper <- predict(j7, type = "psi")
 juniper
 
-ggplot(data = juniper, aes(x= Season, y = estimate, shape = Fire))+
+ggplot(data = juniper, aes(x= Year, y = estimate, shape = Fire))+
   geom_point(size = 3)+
   geom_line()+ 
   theme_classic()
@@ -1424,7 +1788,7 @@ ggplot(data = juniper, aes(x= Season, y = estimate, shape = Fire))+
 burned_y <- format_y(
   x = dh.sub[dh.sub$Fire == 1,],
   site_column = "site",
-  time_column = "season",
+  time_column = "Year",
   history_columns = 1:25
 )
 
@@ -1439,13 +1803,13 @@ b1 <- auto_occ(
       y= burned_y)
 
 burned_frame <- list(
-   Season = matrix(c(rep(1, 12), rep(2, 12), rep(3, 12), rep(4, 12)), nrow = 16, ncol = 4),
+   Year = matrix(c(rep(1, 12), rep(2, 12), rep(3, 12), rep(4, 12)), nrow = 16, ncol = 4),
    Forest = burned.covariates$Forest
  )
 
 b7 <- auto_occ(
       ~ Forest
-      ~ Season * Forest,
+      ~ Year * Forest,
       y= burned_y,
       det_covs = burned_frame,
       occ_covs = burned_frame
@@ -1454,11 +1818,1483 @@ b7 <- auto_occ(
 burned <- predict(b7, type = "psi")
 burned
 
-ggplot(data = burned, aes(x= Season, y = estimate, color = Forest))+
+ggplot(data = burned, aes(x= Year, y = estimate, color = Forest))+
   geom_point(size = 3)+
   geom_line()+ 
   theme_classic()
 
+
+
+```
+
+Best occupancy without accounting for detection
+ie p ~ 1
+
+```{r}
+
+
+# make named list (don't worry about the warning)
+Year_frame <- list(
+   Year = matrix(
+     dh$Year,
+     ncol = dim(deer_y)[2],
+     nrow = dim(deer_y)[1]
+   ),
+   Forest = deer_covariates$Forest,
+   Fire = deer_covariates$Fire,
+   Season = matrix(seasons,
+                   ncol = dim(deer_y)[2],
+     nrow = dim(deer_y)[1])
+ )
+
+
+### Lets find the best occupancy model
+
+# Find best occupancy model
+onull <- auto_occ(
+      ~ 1
+      ~1,
+      y= deer_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+o1 <- auto_occ(
+      ~ 1
+      ~ Forest,
+      y= deer_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+o2 <- auto_occ(
+      ~ 1
+      ~ Fire,
+      y= deer_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+o3 <- auto_occ(
+      ~ 1
+      ~ Year,
+      y= deer_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+
+
+
+o4 <- auto_occ(
+      ~ 1
+      ~ Fire + Forest,
+      y= deer_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+
+
+o5 <- auto_occ(
+      ~ 1
+      ~ Fire * Forest,
+      y= deer_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+o6 <- auto_occ(
+      ~ 1
+      ~ Fire + Year,
+      y= deer_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+o7 <- auto_occ(
+      ~ 1
+      ~ Fire * Year,
+      y= deer_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+o8 <- auto_occ(
+      ~ 1
+      ~ Forest + Year,
+      y= deer_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+o9 <- auto_occ(
+      ~ 1
+      ~ Forest * Year,
+      y= deer_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+
+# Comparing models
+o.aic <- compare_models(
+  list(null = onull,
+       Forest = o1,
+       Fire = o2,
+       Year = o3,
+       `Fire+Forest` = o4,
+       `Fire*Forest` = o5,
+       `Fire+Year` = o6,
+       `Fire*Year` = o7,
+       `Forest+Year` = o8,
+       `Forest*Year` = o9),
+  digits = 2
+)
+
+o.aic
+
+variables <- list(
+  Forest = c("Forest*Year", "Forest", "Forest+Fire", "Forest+Year", "Forest*Fire"),
+  Year = c("Forest*Year", "Forest+Year", "Year", "Fire+Year", "Fire*Year"),
+  Fire = c("Forest+Fire", "Fire", "Forest*Fire", "Fire+Year", "Fire*Year")
+)
+
+#### Lots of top competing models
+
+#Calculate relative variable importance
+
+importance<- sapply(variables, function(models){
+  sum(o.aic$AICwt[o.aic$model %in% models])
+})
+
+importance <- as.data.frame(importance)
+importance$variable <- row.names(importance)
+
+
+ggplot(importance, aes(x = importance, y = variable)) +
+  geom_point(size = 3, color = "blue") +
+  geom_text(aes(label = importance), hjust = -0.2, size = 4) +
+  labs(x = "Relative Importance (w+)", y = "Variable", 
+       title = "Relative Variable Importance") +
+  theme_classic() +
+  xlim(0, 1)+
+  theme(
+   text = element_text(family = "serif", size = 12, color = "black"),
+    axis.title = element_text(size = 12, color = "black"),
+    axis.text = element_text(size = 12, color = "black"),
+    legend.text = element_text(size = 12, color = "black"),
+    legend.title = element_text(size = 12, color = "black"),
+    plot.title = element_text(size = 12, color = "black"),
+    plot.subtitle = element_text(size = 12, color = "black"),
+    plot.caption = element_text(size = 12, color = "black")
+  )
+
+
+
+```
+
+
+Now break it down by seasons
+
+First check the differences between seasons
+
+```{r}
+
+psis1 <- auto_occ(
+      ~ 1
+      ~ Season,
+      y= deer_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+pred.season <- predict(psis1, type = "psi")
+
+ggplot(data = pred.season, aes(y= estimate, x=Season))+
+  geom_col()+
+  geom_errorbar(aes(ymin = lower, ymax = upper), width = 0.2, position = position_dodge(0.2))+
+  theme_classic()+
+  ylab("Deer Occupancy")+
+  theme(text = element_text(family = "serif", size = 12))+
+  theme(
+ text = element_text(family = "serif", size = 12, color = "black"),
+    axis.title = element_text(size = 12, color = "black"),
+    axis.text = element_text(size = 12, color = "black"),
+    legend.text = element_text(size = 12, color = "black"),
+    legend.title = element_text(size = 12, color = "black"),
+    plot.title = element_text(size = 12, color = "black"),
+    plot.subtitle = element_text(size = 12, color = "black"),
+    plot.caption = element_text(size = 12, color = "black")
+  )+
+  ylim(0,1)
+
+```
+
+
+Now do season with forest
+
+```{r}
+
+psisf1 <- auto_occ(
+      ~ 1
+      ~ Season + Forest,
+      y= deer_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+summary(psisf1)
+
+pred.sf <- predict(psisf1, type = "psi")
+
+pred.sf
+
+ggplot(data = pred.sf, aes(y= estimate, x=Season, fill = Forest))+
+  geom_col(position = position_dodge(0.9))+
+  geom_errorbar(aes(ymin = lower, ymax = upper), width = 0.2, position = position_dodge(0.9))+
+  theme_classic()+
+  ylab("Deer Occupancy")+
+  theme(text = element_text(family = "serif", size = 12))+
+  theme(
+ text = element_text(family = "serif", size = 12, color = "black"),
+    axis.title = element_text(size = 12, color = "black"),
+    axis.text = element_text(size = 12, color = "black"),
+    legend.text = element_text(size = 12, color = "black"),
+    legend.title = element_text(size = 12, color = "black"),
+    plot.title = element_text(size = 12, color = "black"),
+    plot.subtitle = element_text(size = 12, color = "black"),
+    plot.caption = element_text(size = 12, color = "black")
+  )+
+  ylim(0,1)
+
+```
+
+Isolate seasons and run occupancy models seperately
+
+```{r}
+
+dh
+
+# make named list (don't worry about the warning)
+Year_frame <- list(
+   Year = matrix(
+     dh$Year,
+     ncol = dim(deer_y)[2],
+     nrow = dim(deer_y)[1]
+   ),
+   Forest = deer_covariates$Forest,
+   Fire = deer_covariates$Fire,
+   Season = matrix(seasons,
+                   ncol = dim(deer_y)[2],
+     nrow = dim(deer_y)[1])
+                   
+ )
+
+Year_frame
+
+seasons_dh <- DetHist1$detection_history
+colnames(seasons_dh) <- seasons
+head(seasons_dh)
+
+###### Find seasons correctly #######
+
+# Use seasons dh
+summer_positions <- which(seasons == "Summer")
+
+summer_dh <- DetHist1$detection_history[,summer_positions]
+summer_dh
+
+s1 <- summer_dh[,1:9]
+
+s2 <- summer_dh[,10:18]
+
+s3 <- summer_dh[,19:27]
+
+s4 <- summer_dh[,28:33]
+
+# Make s4 the same length as the others
+s4 <- cbind(s4,matrix(NA,nrow = 32, ncol = 3))
+
+
+summer_dh <- rbind(s1,s2,s3,s4)
+
+
+summer_dh <- as.data.frame(summer_dh)
+summer_dh$Year<- sequence
+summer_dh$site <- substr(row.names(summer_dh),1,9)
+
+summer_y <- format_y(
+  x = summer_dh,
+  site_column = "site",
+  time_column = "Year", 
+  history_columns = 1:9
+)
+
+head(summer_y)
+
+#### Subset only winter detection histories ####
+
+winter_positions <- which(seasons == "Winter")
+
+winter_dh <- DetHist1$detection_history[,winter_positions]
+winter_dh
+
+s1 <- winter_dh[,1:9]
+
+s2 <- winter_dh[,10:18]
+
+s3 <- winter_dh[,19:27]
+
+s4 <- winter_dh[,28:35] ## More winters than summers cos of when we collected
+
+# Make s4 the same length as the others
+s4 <- cbind(s4,matrix(NA,nrow = 32, ncol = 1))
+
+
+winter_dh <- rbind(s1,s2,s3,s4)
+
+
+winter_dh <- as.data.frame(winter_dh)
+winter_dh$Year<- sequence
+winter_dh$site <- substr(row.names(winter_dh),1,9)
+
+winter_y <- format_y(
+  x = winter_dh,
+  site_column = "site",
+  time_column = "Year", 
+  history_columns = 1:9
+)
+
+head(winter_y)
+
+#### Subset only fall detection histories ####
+
+fall_positions <- which(seasons == "Fall")
+
+fall_dh <- DetHist1$detection_history[,fall_positions]
+fall_dh
+
+s1 <- fall_dh[,1:3]
+
+s2 <- fall_dh[,4:7]
+
+s3 <- fall_dh[,8:11]
+
+s4 <- fall_dh[,12:16] 
+
+# Make s1 the same length as the others
+s1 <- cbind(s1,matrix(NA,nrow = 32, ncol = 2))
+s2 <- cbind(s2,matrix(NA,nrow = 32, ncol = 1))
+s3 <- cbind(s3,matrix(NA,nrow = 32, ncol = 1))
+
+fall_dh <- rbind(s1,s2,s3,s4)
+
+
+fall_dh <- as.data.frame(fall_dh)
+fall_dh$Year<- sequence
+fall_dh$site <- substr(row.names(fall_dh),1,9)
+
+fall_y <- format_y(
+  x = fall_dh,
+  site_column = "site",
+  time_column = "Year", 
+  history_columns = 1:4
+)
+
+head(fall_y)
+
+#### Subset only spring detection histories ####
+
+spring_positions <- which(seasons == "Spring")
+
+spring_dh <- DetHist1$detection_history[,spring_positions]
+spring_dh
+
+s1 <- spring_dh[,1:4]
+
+s2 <- spring_dh[,5:8]
+
+s3 <- spring_dh[,9:12]
+
+s4 <- spring_dh[,13:16] ## More winters than summers cos of when we collected
+
+
+spring_dh <- rbind(s1,s2,s3,s4)
+
+
+spring_dh <- as.data.frame(spring_dh)
+spring_dh$Year<- sequence
+spring_dh$site <- substr(row.names(spring_dh),1,9)
+
+spring_y <- format_y(
+  x = spring_dh,
+  site_column = "site",
+  time_column = "Year", 
+  history_columns = 1:4
+)
+
+head(spring_y)
+
+
+
+
+```
+
+Rerun model selections on each season
+# Start with summer
+
+```{r}
+
+# Find best detection model
+
+p.sum.d.null <- auto_occ(
+      ~ 1
+      ~1,
+      y= summer_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+p.sum.d.1 <- auto_occ(
+      ~ Forest
+      ~ 1,
+      y= summer_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+p.sum.d.2 <- auto_occ(
+      ~ Fire
+      ~ 1,
+      y= summer_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+p.sum.d.3 <- auto_occ(
+      ~ Year
+      ~ 1,
+      y= summer_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+
+
+p.sum.d.4 <- auto_occ(
+      ~ Forest + Fire
+      ~ 1,
+      y= summer_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+
+
+p.sum.d.5 <- auto_occ(
+      ~ Forest* Fire
+      ~ 1,
+      y= summer_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+p.sum.d.6 <- auto_occ(
+      ~ Forest + Year
+      ~ 1,
+      y= summer_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+p.sum.d.7 <- auto_occ(
+      ~ Forest* Year
+      ~ 1,
+      y= summer_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+p.sum.d.8 <- auto_occ(
+      ~ Fire + Year
+      ~ 1,
+      y= summer_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+p.sum.d.9 <- auto_occ(
+      ~ Fire * Year
+      ~ 1,
+      y= summer_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+# Comparing models
+p.sum.d..aic <- compare_models(
+  list(null = p.sum.d.null,
+       Forest = p.sum.d.1,
+       Fire = p.sum.d.2,
+       Year = p.sum.d.3,
+       `Forest+Fire` = p.sum.d.4,
+       `Forest*Fire` = p.sum.d.5,
+       `Forest+Year` = p.sum.d.6,
+       `Forest*Year` =p.sum.d.7,
+       `Fire+Year` = p.sum.d.8,
+       `Fire*Year` = p.sum.d.9),
+  digits = 2
+)
+
+p.sum.d..aic
+
+write.csv(p.sum.d..aic, "Det_Deer_Fire_Summer.csv")
+
+# Find best occupancy model
+psi.sum.d.null <- auto_occ(
+      ~ Forest* Fire
+      ~1,
+      y= summer_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+psi.sum.d.1 <- auto_occ(
+      ~ Forest* Fire
+      ~ Forest,
+      y= summer_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+psi.sum.d.2 <- auto_occ(
+      ~ Forest* Fire
+      ~ Fire,
+      y= summer_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+psi.sum.d.3 <- auto_occ(
+      ~ Forest* Fire
+      ~ Year,
+      y= summer_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+
+
+psi.sum.d.4 <- auto_occ(
+      ~ Forest* Fire
+      ~ Forest + Fire,
+      y= summer_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+
+
+psi.sum.d.5 <- auto_occ(
+      ~ Forest* Fire
+      ~ Forest * Fire,
+      y= summer_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+psi.sum.d.6 <- auto_occ(
+      ~ Forest* Fire
+      ~ Forest + Year,
+      y= summer_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+psi.sum.d.7 <- auto_occ(
+      ~ Forest* Fire
+      ~ Forest * Year,
+      y= summer_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+psi.sum.d.8 <- auto_occ(
+      ~ Forest* Fire
+      ~ Fire + Year,
+      y= summer_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+psi.sum.d.9 <- auto_occ(
+      ~ Forest* Fire
+      ~ Fire * Year,
+      y= summer_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+# Comparing models
+psi.sum.d..aic <- compare_models(
+  list(null = psi.sum.d.null,
+       Forest = psi.sum.d.1,
+       Fire = psi.sum.d.2,
+       Year = psi.sum.d.3,
+       `Forest+Fire` = psi.sum.d.4,
+       `Forest*Fire` = psi.sum.d.5,
+       `Forest+Year` = psi.sum.d.6,
+       `Forest*Year` =psi.sum.d.7,
+       `Fire+Year` = psi.sum.d.8,
+       `Fire*Year` = psi.sum.d.9),
+  digits = 2
+)
+
+psi.sum.d..aic
+## 7 is best model
+
+#Model prediction
+
+pred.deer.sum <- predict(psi.sum.d.7, type = "psi")
+
+head(pred.deer.sum)
+
+sum_b <- summary(psi.sum.d.7)
+
+dsum_b <- sum_b@rho
+osum_b <- sum_b@psi
+
+write.csv(dsum_b, "Det_Deer_Summer_Betas.csv")
+write.csv(osum_b, "Occ_Deer_Summer_Betas.csv")
+
+ggplot(data = pred.deer.sum, aes(y= estimate, x= Year, colour = Forest))+
+  geom_smooth()+
+  geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.1, linetype = "dashed", fill = "white")+
+  theme_classic()+
+  ylab("Deer Occupancy")+
+  labs(color = "Forest Type")+
+  scale_color_manual(values = c("A" = "#FFCC33", "M"= "red", "J"= "darkgreen"),label = c("Aspen Conifer", 
+                            "Pinyon Juniper",
+                            "Oak Maple"))+
+  theme(plot.title    = element_text(size=12, family = "serif", colour = "black"),
+        plot.subtitle = element_text(size=12, family = "serif"),
+        axis.title.x  = element_text(size=12, family = "serif", colour = "black"),
+        axis.title.y  = element_text(size=12, family = "serif", colour = "black"),
+        axis.text.x   = element_text(size=12, family = "serif", colour = "black"),
+        axis.text.y   = element_text(size=12, family = "serif", colour = "black"),
+        legend.text   = element_text(size=12, family = "serif", colour = "black"),
+        legend.title  = element_text(size=12, family = "serif", colour = "black"),
+        panel.border  = element_blank())+
+  scale_y_continuous(limits = c(0, 1))
+
+# Rerun without legend
+ggplot(data = pred.deer.sum, aes(y= estimate, x= Year, colour = Forest))+
+  geom_smooth()+
+  geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.1, linetype = "dashed", fill = "white")+
+  theme_classic()+
+  ylab("Summer Deer Occupancy")+
+  labs(color = "Forest Type")+
+  scale_color_manual(values = c("A" = "#FFCC33", "M"= "red", "J"= "darkgreen"),label = c("Aspen Conifer", 
+                            "Pinyon Juniper",
+                            "Oak Maple"))+
+  theme(plot.title    = element_text(size=12, family = "serif", colour = "black"),
+        plot.subtitle = element_text(size=12, family = "serif"),
+        axis.title.x  = element_text(size=12, family = "serif", colour = "black"),
+        axis.title.y  = element_text(size=12, family = "serif", colour = "black"),
+        axis.text.x   = element_text(size=12, family = "serif", colour = "black"),
+        axis.text.y   = element_text(size=12, family = "serif", colour = "black"),
+        legend.text   = element_text(size=12, family = "serif", colour = "black"),
+        legend.title  = element_text(size=12, family = "serif", colour = "black"),
+        panel.border  = element_blank())+
+  scale_y_continuous(limits = c(0, 1))+
+  theme(legend.position = "none")
+
+write.csv(psi.sum.d..aic, "Occ_Deer_Fire_Summer.csv")
+
+```
+
+# Winter only occupancy
+
+```{r}
+
+# Find best detection model
+
+# Find best occupancy model
+p.win.d.null <- auto_occ(
+      ~ 1
+      ~1,
+      y= winter_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+p.wind.1 <- auto_occ(
+      ~ Forest
+      ~ 1,
+      y= winter_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+p.wind.2 <- auto_occ(
+      ~ Fire
+      ~ 1,
+      y= winter_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+p.wind.3 <- auto_occ(
+      ~ Year
+      ~ 1,
+      y= winter_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+
+
+p.wind.4 <- auto_occ(
+      ~ Forest + Fire
+      ~ 1,
+      y= winter_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+
+
+p.wind.5 <- auto_occ(
+      ~ Forest* Fire
+      ~ 1,
+      y= winter_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+p.wind.6 <- auto_occ(
+      ~ Forest + Year
+      ~ 1,
+      y= winter_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+p.wind.7 <- auto_occ(
+      ~ Forest* Year
+      ~ 1,
+      y= winter_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+p.wind.8 <- auto_occ(
+      ~ Fire + Year
+      ~ 1,
+      y= winter_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+p.wind.9 <- auto_occ(
+      ~ Fire * Year
+      ~ 1,
+      y= winter_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+# Comparing models
+p.wind.aic <- compare_models(
+  list(null = p.win.d.null,
+       Forest = p.wind.1,
+       Fire = p.wind.2,
+       Year = p.wind.3,
+       `Forest+Fire` = p.wind.4,
+       `Forest*Fire` = p.wind.5,
+       `Forest+Year` = p.wind.6,
+       `Forest*Year` =p.wind.7,
+       `Fire+Year` = p.wind.8,
+       `Fire*Year` = p.wind.9),
+  digits = 2
+)
+
+p.wind.aic
+
+write.csv(p.wind.aic, "Det_Deer_Fire_Winter.csv")
+
+# Find best occupancy model
+psi.wind.null <- auto_occ(
+      ~ Forest* Fire
+      ~1,
+      y= winter_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+psi.wind.1 <- auto_occ(
+      ~ Forest* Fire
+      ~ Forest,
+      y= winter_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+psi.wind.2 <- auto_occ(
+      ~ Forest* Fire
+      ~ Fire,
+      y= winter_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+psi.wind.3 <- auto_occ(
+      ~ Forest* Fire
+      ~ Year,
+      y= winter_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+
+
+psi.wind.4 <- auto_occ(
+      ~ Forest* Fire
+      ~ Forest + Fire,
+      y= winter_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+
+
+psi.wind.5 <- auto_occ(
+      ~ Forest* Fire
+      ~ Forest * Fire,
+      y= winter_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+psi.wind.6 <- auto_occ(
+      ~ Forest* Fire
+      ~ Forest + Year,
+      y= winter_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+psi.wind.7 <- auto_occ(
+      ~ Forest* Fire
+      ~ Forest * Year,
+      y= winter_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+psi.wind.8 <- auto_occ(
+      ~ Forest* Fire
+      ~ Fire + Year,
+      y= winter_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+psi.wind.9 <- auto_occ(
+      ~ Forest* Fire
+      ~ Fire * Year,
+      y= winter_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+# Comparing models
+psi.wind..aic <- compare_models(
+  list(null = psi.wind.null,
+       Forest = psi.wind.1,
+       Fire = psi.wind.2,
+       Year = psi.wind.3,
+       `Forest+Fire` = psi.wind.4,
+       `Forest*Fire` = psi.wind.5,
+       `Forest+Year` = psi.wind.6,
+       `Forest*Year` =psi.wind.7,
+       `Fire+Year` = psi.wind.8,
+       `Fire*Year` = psi.wind.9),
+  digits = 2
+)
+
+psi.wind..aic
+
+pred.deer.win <- predict(psi.wind.7, type = "psi")
+
+win_b <- summary(psi.wind.7)
+
+dwin_b <- win_b@rho
+owin_b <- win_b@psi
+
+write.csv(dwin_b, "Det_Deer_Winter_Betas.csv")
+write.csv(owin_b, "Occ_Deer_Winter_Betas.csv")
+
+
+ggplot(data = pred.deer.win, aes(y= estimate, x= Year, colour = Forest))+
+  geom_smooth()+
+  geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.1, linetype = "dashed", fill = "white")+
+  theme_classic()+
+  ylab("Winter Deer Occupancy")+
+  labs(color = "Forest Type")+
+  scale_color_manual(values = c("A" = "#FFCC33", "M"= "red", "J"= "darkgreen"),label = c("Aspen Conifer", 
+                            "Pinyon Juniper",
+                            "Oak Maple"))+
+  theme(plot.title    = element_text(size=12, family = "serif", colour = "black"),
+        plot.subtitle = element_text(size=12, family = "serif"),
+        axis.title.x  = element_text(size=12, family = "serif", colour = "black"),
+        axis.title.y  = element_text(size=12, family = "serif", colour = "black"),
+        axis.text.x   = element_text(size=12, family = "serif", colour = "black"),
+        axis.text.y   = element_text(size=12, family = "serif", colour = "black"),
+        legend.text   = element_text(size=12, family = "serif", colour = "black"),
+        legend.title  = element_text(size=12, family = "serif", colour = "black"),
+        panel.border  = element_blank())+
+  scale_y_continuous(limits = c(0, 1))
+
+
+# Without legend
+
+ggplot(data = pred.deer.win, aes(y= estimate, x= Year, colour = Forest))+
+  geom_smooth()+
+  geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.1, linetype = "dashed", fill = "white")+
+  theme_classic()+
+  ylab("Winter Deer Occupancy")+
+  labs(color = "Forest Type")+
+  scale_color_manual(values = c("A" = "#FFCC33", "M"= "red", "J"= "darkgreen"),label = c("Aspen Conifer", 
+                            "Pinyon Juniper",
+                            "Oak Maple"))+
+  theme(plot.title    = element_text(size=12, family = "serif", colour = "black"),
+        plot.subtitle = element_text(size=12, family = "serif"),
+        axis.title.x  = element_text(size=12, family = "serif", colour = "black"),
+        axis.title.y  = element_text(size=12, family = "serif", colour = "black"),
+        axis.text.x   = element_text(size=12, family = "serif", colour = "black"),
+        axis.text.y   = element_text(size=12, family = "serif", colour = "black"),
+        legend.text   = element_text(size=12, family = "serif", colour = "black"),
+        legend.title  = element_text(size=12, family = "serif", colour = "black"),
+        panel.border  = element_blank())+
+  scale_y_continuous(limits = c(0, 1))+
+  theme(legend.position = "none")
+
+write.csv(psi.wind..aic, "Occ_Deer_Fire_Winter.csv")
+
+```
+
+# Fall only
+
+```{r}
+
+# Find best detection model
+
+p.fall.d.null <- auto_occ(
+      ~ 1
+      ~1,
+      y= fall_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+p.fall.d.1 <- auto_occ(
+      ~ Forest
+      ~ 1,
+      y= fall_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+p.fall.d.2 <- auto_occ(
+      ~ Fire
+      ~ 1,
+      y= fall_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+p.fall.d.3 <- auto_occ(
+      ~ Year
+      ~ 1,
+      y= fall_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+
+
+p.fall.d.4 <- auto_occ(
+      ~ Forest + Fire
+      ~ 1,
+      y= fall_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+
+
+p.fall.d.5 <- auto_occ(
+      ~ Forest* Fire
+      ~ 1,
+      y= fall_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+p.fall.d.6 <- auto_occ(
+      ~ Forest + Year
+      ~ 1,
+      y= fall_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+p.fall.d.7 <- auto_occ(
+      ~ Forest* Year
+      ~ 1,
+      y= fall_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+p.fall.d.8 <- auto_occ(
+      ~ Fire + Year
+      ~ 1,
+      y= fall_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+p.fall.d.9 <- auto_occ(
+      ~ Fire * Year
+      ~ 1,
+      y= fall_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+# Comparing models
+p.fall.d..aic <- compare_models(
+  list(null = p.fall.d.null,
+       Forest = p.fall.d.1,
+       Fire = p.fall.d.2,
+       Year = p.fall.d.3,
+       `Forest+Fire` = p.fall.d.4,
+       `Forest*Fire` = p.fall.d.5,
+       `Forest+Year` = p.fall.d.6,
+       `Forest*Year` =p.fall.d.7,
+       `Fire+Year` = p.fall.d.8,
+       `Fire*Year` = p.fall.d.9),
+  digits = 2
+)
+
+p.fall.d..aic
+
+write.csv(p.fall.d..aic, "Det_Deer_Fire_Fall.csv")
+
+# Find best occupancy model
+psi.fall.d.null <- auto_occ(
+      ~ Forest* Fire
+      ~1,
+      y= fall_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+psi.fall.d.1 <- auto_occ(
+      ~ Forest* Fire
+      ~ Forest,
+      y= fall_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+psi.fall.d.2 <- auto_occ(
+      ~ Forest* Fire
+      ~ Fire,
+      y= fall_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+psi.fall.d.3 <- auto_occ(
+      ~ Forest* Fire
+      ~ Year,
+      y= fall_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+
+
+psi.fall.d.4 <- auto_occ(
+      ~ Forest* Fire
+      ~ Forest + Fire,
+      y= fall_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+
+
+psi.fall.d.5 <- auto_occ(
+      ~ Forest* Fire
+      ~ Forest * Fire,
+      y= fall_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+psi.fall.d.6 <- auto_occ(
+      ~ Forest* Fire
+      ~ Forest + Year,
+      y= fall_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+psi.fall.d.7 <- auto_occ(
+      ~ Forest* Fire
+      ~ Forest * Year,
+      y= fall_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+psi.fall.d.8 <- auto_occ(
+      ~ Forest* Fire
+      ~ Fire + Year,
+      y= fall_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+psi.fall.d.9 <- auto_occ(
+      ~ Forest* Fire
+      ~ Fire * Year,
+      y= fall_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+# Comparing models
+psi.fall.d..aic <- compare_models(
+  list(null = psi.fall.d.null,
+       Forest = psi.fall.d.1,
+       Fire = psi.fall.d.2,
+       Year = psi.fall.d.3,
+       `Forest+Fire` = psi.fall.d.4,
+       `Forest*Fire` = psi.fall.d.5,
+       `Forest+Year` = psi.fall.d.6,
+       `Forest*Year` =psi.fall.d.7,
+       `Fire+Year` = psi.fall.d.8,
+       `Fire*Year` = psi.fall.d.9),
+  digits = 2
+)
+
+psi.fall.d..aic
+
+# Best model 2
+
+pred.deer.fall <- predict(psi.fall.d.2, type = "psi")
+
+fall_b <- summary(psi.fall.d.2)
+
+dfall_b <- fall_b@rho
+ofall_b <- fall_b@psi
+
+write.csv(dfall_b, "Det_Deer_Fall_Betas.csv")
+write.csv(ofall_b, "Occ_Deer_Fall_Betas.csv")
+
+ggplot(data = pred.deer.fall, aes(y = estimate, x = Fire)) +
+  geom_point(size = 2) +
+  geom_errorbar(aes(ymin = lower, ymax = upper, width = 0.2)) +
+  ylim(0, 1) +
+  theme_classic() +
+  ylab("Fall Deer Occupancy") +
+  scale_x_discrete(labels = c("Unburned", "Burned")) +
+  theme(
+     text = element_text(family = "serif", size = 12, color = "black"),
+    axis.title = element_text(size = 12, color = "black"),
+    axis.text = element_text(size = 12, color = "black"),
+    legend.text = element_text(size = 12, color = "black"),
+    legend.title = element_text(size = 12, color = "black"),
+    plot.title = element_text(size = 12, color = "black"),
+    plot.subtitle = element_text(size = 12, color = "black"),
+    plot.caption = element_text(size = 12, color = "black")
+  )+
+  theme(plot.margin = margin(10, 10, 10, 10))
+
+write.csv(psi.fall.d..aic, "Occ_Deer_Fire_Fall.csv")
+
+```
+
+```{r}
+
+# Find best detection model
+
+p.spr.d.null <- auto_occ(
+      ~ 1
+      ~1,
+      y= spring_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+p.spr.d.1 <- auto_occ(
+      ~ Forest
+      ~ 1,
+      y= spring_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+p.spr.d.2 <- auto_occ(
+      ~ Fire
+      ~ 1,
+      y= spring_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+p.spr.d.3 <- auto_occ(
+      ~ Year
+      ~ 1,
+      y= spring_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+
+
+p.spr.d.4 <- auto_occ(
+      ~ Forest + Fire
+      ~ 1,
+      y= spring_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+
+
+p.spr.d.5 <- auto_occ(
+      ~ Forest* Fire
+      ~ 1,
+      y= spring_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+p.spr.d.6 <- auto_occ(
+      ~ Forest + Year
+      ~ 1,
+      y= spring_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+p.spr.d.7 <- auto_occ(
+      ~ Forest* Year
+      ~ 1,
+      y= spring_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+p.spr.d.8 <- auto_occ(
+      ~ Fire + Year
+      ~ 1,
+      y= spring_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+p.spr.d.9 <- auto_occ(
+      ~ Fire * Year
+      ~ 1,
+      y= spring_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+# Comparing models
+p.spr.d..aic <- compare_models(
+  list(null = p.spr.d.null,
+       Forest = p.spr.d.1,
+       Fire = p.spr.d.2,
+       Year = p.spr.d.3,
+       `Forest+Fire` = p.spr.d.4,
+       `Forest*Fire` = p.spr.d.5,
+       `Forest+Year` = p.spr.d.6,
+       `Forest*Year` =p.spr.d.7,
+       `Fire+Year` = p.spr.d.8,
+       `Fire*Year` = p.spr.d.9),
+  digits = 2
+)
+
+p.spr.d..aic
+
+write.csv(p.spr.d..aic, "Det_Deer_Fire_Spring.csv")
+
+# Find best occupancy model
+psi.spr.d.null <- auto_occ(
+      ~ Forest* Fire
+      ~1,
+      y= spring_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+psi.spr.d.1 <- auto_occ(
+      ~ Forest* Fire
+      ~ Forest,
+      y= spring_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+psi.spr.d.2 <- auto_occ(
+      ~ Forest* Fire
+      ~ Fire,
+      y= spring_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+psi.spr.d.3 <- auto_occ(
+      ~ Forest* Fire
+      ~ Year,
+      y= spring_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+
+
+psi.spr.d.4 <- auto_occ(
+      ~ Forest* Fire
+      ~ Forest + Fire,
+      y= spring_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+
+
+psi.spr.d.5 <- auto_occ(
+      ~ Forest* Fire
+      ~ Forest * Fire,
+      y= spring_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+psi.spr.d.6 <- auto_occ(
+      ~ Forest* Fire
+      ~ Forest + Year,
+      y= spring_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+psi.spr.d.7 <- auto_occ(
+      ~ Forest* Fire
+      ~ Forest * Year,
+      y= spring_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+psi.spr.d.8 <- auto_occ(
+      ~ Forest* Fire
+      ~ Fire + Year,
+      y= spring_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+psi.spr.d.9 <- auto_occ(
+      ~ Forest* Fire
+      ~ Fire * Year,
+      y= spring_y,
+      det_covs = Year_frame,
+      occ_covs = Year_frame
+)
+
+# Comparing models
+psi.spr.d..aic <- compare_models(
+  list(null = psi.spr.d.null,
+       Forest = psi.spr.d.1,
+       Fire = psi.spr.d.2,
+       Year = psi.spr.d.3,
+       `Forest+Fire` = psi.spr.d.4,
+       `Forest*Fire` = psi.spr.d.5,
+       `Forest+Year` = psi.spr.d.6,
+       `Forest*Year` =psi.spr.d.7,
+       `Fire+Year` = psi.spr.d.8,
+       `Fire*Year` = psi.spr.d.9),
+  digits = 2
+)
+
+psi.spr.d..aic
+
+pred.deer.spr <- predict(psi.spr.d.7, type = "psi")
+
+spr_b <- summary(psi.spr.d.7)
+
+dspr_b <- spr_b@rho
+ospr_b <- spr_b@psi
+
+write.csv(dspr_b, "Det_Deer_Spring_Betas.csv")
+write.csv(ospr_b, "Occ_Deer_Spring_Betas.csv")
+
+ggplot(data = pred.deer.spr, aes(y= estimate, x= Year, colour = Forest))+
+  geom_smooth()+
+  geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.1, linetype = "dashed", fill = "white")+
+  theme_classic()+
+  ylab("Spring Deer Occupancy")+
+  labs(color = "Forest Type")+
+  scale_color_manual(values = c("A" = "#FFCC33", "M"= "red", "J"= "darkgreen"),label = c("Aspen Conifer", 
+                            "Pinyon Juniper",
+                            "Oak Maple"))+
+  theme(plot.title    = element_text(size=12, family = "serif", colour = "black"),
+        plot.subtitle = element_text(size=12, family = "serif"),
+        axis.title.x  = element_text(size=12, family = "serif", colour = "black"),
+        axis.title.y  = element_text(size=12, family = "serif", colour = "black"),
+        axis.text.x   = element_text(size=12, family = "serif", colour = "black"),
+        axis.text.y   = element_text(size=12, family = "serif", colour = "black"),
+        legend.text   = element_text(size=12, family = "serif", colour = "black"),
+        legend.title  = element_text(size=12, family = "serif", colour = "black"),
+        panel.border  = element_blank())+
+  scale_y_continuous(limits = c(0, 1))
+
+
+# Without legend
+
+ggplot(data = pred.deer.spr, aes(y= estimate, x= Year, colour = Forest))+
+  geom_smooth()+
+  geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.1, linetype = "dashed", fill = "white")+
+  theme_classic()+
+  ylab("Spring Deer Occupancy")+
+  labs(color = "Forest Type")+
+  scale_color_manual(values = c("A" = "#FFCC33", "M"= "red", "J"= "darkgreen"),label = c("Aspen Conifer", 
+                            "Pinyon Juniper",
+                            "Oak Maple"))+
+  theme(plot.title    = element_text(size=12, family = "serif", colour = "black"),
+        plot.subtitle = element_text(size=12, family = "serif"),
+        axis.title.x  = element_text(size=12, family = "serif", colour = "black"),
+        axis.title.y  = element_text(size=12, family = "serif", colour = "black"),
+        axis.text.x   = element_text(size=12, family = "serif", colour = "black"),
+        axis.text.y   = element_text(size=12, family = "serif", colour = "black"),
+        legend.text   = element_text(size=12, family = "serif", colour = "black"),
+        legend.title  = element_text(size=12, family = "serif", colour = "black"),
+        panel.border  = element_blank())+
+  scale_y_continuous(limits = c(0, 1))+
+  theme(legend.position = "none")
+
+write.csv(psi.spr.d..aic, "Occ_Deer_Fire_Spring.csv")
 
 
 ```
